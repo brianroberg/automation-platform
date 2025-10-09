@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Environment
+.env
+
+# Configuration (contains secrets)
+config/gmail_credentials.json
+config/gmail_token.json
+
+# Data
+data/logs/*.log
+data/cache/
+data/state/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store
+
+# Distribution
+dist/
+build/
+*.egg-info/

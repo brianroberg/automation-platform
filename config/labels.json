@@ -1,0 +1,17 @@
+{
+  "labels": [
+    {
+      "name": "response-required",
+      "description": "Emails that require a direct response or action from the recipient. Includes questions, requests, invitations requiring RSVP, or time-sensitive matters."
+    },
+    {
+      "name": "fyi",
+      "description": "Informational emails that don't require a response. Includes updates, announcements, reports, newsletters, or general information sharing."
+    },
+    {
+      "name": "transactional",
+      "description": "Automated system-generated emails like receipts, confirmations, password resets, shipping notifications, or account alerts."
+    }
+  ],
+  "default_label": "fyi"
+}
