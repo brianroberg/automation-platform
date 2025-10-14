@@ -3,9 +3,9 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore[import-not-found]
 
 # Load environment variables
 load_dotenv()
@@ -31,8 +31,9 @@ class Config:
     ]
 
     # LLM Configuration
-    LLM_MODEL = os.getenv("LLM_MODEL", "gpt-oss-20b-MXFP4-Q8")
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mlx")
+    # LLM_MODEL should match the model loaded on the MLX server
+    # MLX_SERVER_URL is read directly from environment by LLMClient
+    LLM_MODEL = os.getenv("LLM_MODEL", "mlx-community/Llama-3.2-3B-Instruct-4bit")
 
     # Label Configuration
     LABEL_CONFIG_FILE = PROJECT_ROOT / os.getenv("LABEL_CONFIG_FILE", "config/labels.json")
@@ -60,7 +61,7 @@ class Config:
             )
 
         with open(cls.LABEL_CONFIG_FILE, "r") as f:
-            config = json.load(f)
+            config = cast(dict[str, Any], json.load(f))
 
         logger.info(f"Loaded {len(config.get('labels', []))} label definitions")
         return config

@@ -549,20 +549,40 @@ build/
 ## Phase 2: LLM Integration
 
 ### Overview
-Integrate Simon Willison's LLM library with MLX support, test the model works locally, and create a clean abstraction for email classification.
+Create an LLM client abstraction for email classification that connects to an MLX server running on the user's macOS laptop. This enables development in Linux environments (Codespaces) while leveraging MLX's Apple Silicon optimization in production.
+
+### Architecture Change (October 2025)
+
+**Original Plan**: Use Simon Willison's `llm` CLI tool via subprocess calls for direct model access.
+
+**Revised Plan**: Use OpenAI Python client library to connect to an MLX server (mlx-lm) running on macOS laptop, accessible via Tailscale.
+
+**Rationale for Change**:
+1. **Platform Constraints**: MLX only works on macOS with Apple Silicon - cannot run in Linux development environments (Codespaces, devcontainers)
+2. **Development-Production Parity**: The application's ultimate deployment target is the user's macOS laptop, so depending on laptop availability is acceptable
+3. **Network Architecture**: Using Tailscale for secure, encrypted access to laptop-hosted MLX server enables development anywhere while maintaining production deployment model
+4. **Better API Design**: Direct HTTP/OpenAI client library is more reliable than subprocess calls, with proper error handling and type safety
+5. **Future Flexibility**: OpenAI-compatible API makes it easy to swap providers (OpenAI, Anthropic, etc.) later without code changes
+
+**Implementation Details**:
+- **Server**: Run `mlx-lm.server` on macOS laptop (official MLX server from Apple's team)
+- **Client**: Use `openai` Python library in Codespaces to connect to server via Tailscale
+- **Configuration**: Store Tailscale IP and model name in environment variables
+- **Security**: Leverage Tailscale's built-in encryption and device authentication
 
 ### Changes Required:
 
 #### 1. LLM Client Abstraction
 **File**: `src/integrations/llm_client.py`
-**Changes**: Create LLM wrapper for email classification
+**Changes**: Create LLM wrapper that connects to MLX server via OpenAI client
 
 ```python
-"""LLM client for email classification using Simon Willison's LLM library."""
-import json
+"""LLM client for email classification using OpenAI-compatible MLX server."""
 import logging
-import subprocess
+import os
 from typing import Any
+
+from openai import OpenAI
 
 from src.core.config import Config
 
@@ -570,49 +590,53 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """Client for interacting with local LLM via llm library."""
+    """Client for interacting with MLX LLM server via OpenAI-compatible API."""
 
-    def __init__(self, model: str | None = None, provider: str | None = None):
+    def __init__(self, model: str | None = None, base_url: str | None = None):
         """Initialize LLM client.
 
         Args:
             model: Model name (defaults to Config.LLM_MODEL)
-            provider: Provider name (defaults to Config.LLM_PROVIDER)
+            base_url: MLX server URL (defaults to MLX_SERVER_URL env var)
         """
         self.model = model or Config.LLM_MODEL
-        self.provider = provider or Config.LLM_PROVIDER
+        self.base_url = base_url or os.getenv("MLX_SERVER_URL")
 
-        logger.info(f"Initialized LLM client with model={self.model}, provider={self.provider}")
-        self._verify_model_available()
-
-    def _verify_model_available(self) -> None:
-        """Verify the model is available through llm library.
-
-        Raises:
-            RuntimeError: If model is not available
-        """
-        try:
-            logger.debug(f"Verifying model {self.model} is available")
-            result = subprocess.run(
-                ["llm", "models", "list"],
-                capture_output=True,
-                text=True,
-                check=True
+        if not self.base_url:
+            raise ValueError(
+                "MLX_SERVER_URL environment variable must be set. "
+                "Example: export MLX_SERVER_URL=http://100.x.x.x:8080"
             )
 
-            if self.model not in result.stdout:
-                logger.error(f"Model {self.model} not found in available models")
-                logger.debug(f"Available models:\n{result.stdout}")
-                raise RuntimeError(
-                    f"Model '{self.model}' not available. "
-                    f"Install with: llm install llm-{self.provider}"
-                )
+        logger.info(f"Initialized LLM client with model={self.model}, server={self.base_url}")
 
-            logger.debug(f"Model {self.model} verified as available")
+        # Initialize OpenAI client pointing to MLX server
+        self.client = OpenAI(
+            base_url=f"{self.base_url}/v1",
+            api_key="not-needed"  # MLX server doesn't require authentication
+        )
 
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to list LLM models: {e.stderr}")
-            raise RuntimeError(f"Failed to verify LLM installation: {e.stderr}")
+        # Verify server is reachable
+        self._verify_server_available()
+
+    def _verify_server_available(self) -> None:
+        """Verify the MLX server is reachable.
+
+        Raises:
+            RuntimeError: If server is not reachable
+        """
+        try:
+            logger.debug(f"Verifying MLX server at {self.base_url}")
+            # Try to list models as a connectivity check
+            models = self.client.models.list()
+            logger.debug(f"MLX server is reachable, models available: {len(models.data)}")
+        except Exception as e:
+            logger.error(f"Failed to connect to MLX server at {self.base_url}: {e}")
+            raise RuntimeError(
+                f"Cannot connect to MLX server at {self.base_url}. "
+                f"Ensure the server is running and Tailscale is connected. "
+                f"Original error: {e}"
+            )
 
     def classify_email(
         self,
@@ -634,7 +658,6 @@ class LLMClient:
 
         Raises:
             RuntimeError: If LLM classification fails
-            ValueError: If LLM returns invalid label
         """
         logger.debug(f"Classifying email from {sender} with subject: {subject[:50]}...")
 
@@ -642,16 +665,19 @@ class LLMClient:
         prompt = self._build_classification_prompt(sender, subject, content, label_config)
 
         try:
-            # Call LLM via subprocess
-            result = subprocess.run(
-                ["llm", "-m", self.model, prompt],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=30  # 30 second timeout for classification
+            # Call MLX server via OpenAI client
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an email classification assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=50,  # Classification should be very short
+                timeout=30.0  # 30 second timeout
             )
 
-            classification = result.stdout.strip().lower()
+            classification = response.choices[0].message.content.strip().lower()
             logger.debug(f"Raw LLM output: {classification}")
 
             # Validate classification is one of the configured labels
@@ -667,13 +693,9 @@ class LLMClient:
             logger.info(f"Classified email as: {classification}")
             return classification
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"LLM classification timed out after 30 seconds")
-            raise RuntimeError("LLM classification timed out")
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"LLM classification failed: {e.stderr}")
-            raise RuntimeError(f"LLM classification failed: {e.stderr}")
+        except Exception as e:
+            logger.error(f"LLM classification failed: {e}")
+            raise RuntimeError(f"LLM classification failed: {e}")
 
     def _build_classification_prompt(
         self,
@@ -702,7 +724,7 @@ class LLMClient:
         # Truncate content if too long (keep first 1000 chars)
         content_preview = content[:1000] + ("..." if len(content) > 1000 else "")
 
-        prompt = f"""You are an email classification system. Classify the following email into exactly one of these categories:
+        prompt = f"""Classify the following email into exactly one of these categories:
 
 {label_descriptions}
 
@@ -718,11 +740,10 @@ Respond with ONLY the category name, nothing else. Choose the single most approp
 
 #### 2. LLM Client Tests
 **File**: `tests/test_llm_client.py`
-**Changes**: Create unit tests for LLM client
+**Changes**: Create unit tests for LLM client (mocking OpenAI client)
 
 ```python
 """Tests for LLM client."""
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -752,42 +773,57 @@ def mock_label_config():
     }
 
 
-@patch("subprocess.run")
-def test_llm_client_initialization(mock_subprocess):
-    """Test LLM client initializes and verifies model."""
-    mock_subprocess.return_value = MagicMock(
-        stdout="gpt-oss-20b-MXFP4-Q8\nother-model\n",
-        returncode=0
-    )
+@patch.dict("os.environ", {"MLX_SERVER_URL": "http://100.64.0.1:8080"})
+@patch("src.integrations.llm_client.OpenAI")
+def test_llm_client_initialization(mock_openai_class):
+    """Test LLM client initializes and verifies server."""
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = MagicMock(data=[{"id": "test-model"}])
+    mock_openai_class.return_value = mock_client
 
-    client = LLMClient(model="gpt-oss-20b-MXFP4-Q8")
+    client = LLMClient(model="mlx-community/Llama-3.2-3B-Instruct-4bit")
 
-    assert client.model == "gpt-oss-20b-MXFP4-Q8"
-    mock_subprocess.assert_called_once()
-
-
-@patch("subprocess.run")
-def test_llm_client_model_not_available(mock_subprocess):
-    """Test LLM client raises error when model unavailable."""
-    mock_subprocess.return_value = MagicMock(
-        stdout="some-other-model\n",
-        returncode=0
-    )
-
-    with pytest.raises(RuntimeError, match="not available"):
-        LLMClient(model="missing-model")
+    assert client.model == "mlx-community/Llama-3.2-3B-Instruct-4bit"
+    assert client.base_url == "http://100.64.0.1:8080"
+    mock_client.models.list.assert_called_once()
 
 
-@patch("subprocess.run")
-def test_classify_email_success(mock_subprocess, mock_label_config):
+@patch.dict("os.environ", {}, clear=True)
+def test_llm_client_requires_server_url():
+    """Test LLM client raises error when MLX_SERVER_URL not set."""
+    with pytest.raises(ValueError, match="MLX_SERVER_URL"):
+        LLMClient(model="test-model")
+
+
+@patch.dict("os.environ", {"MLX_SERVER_URL": "http://100.64.0.1:8080"})
+@patch("src.integrations.llm_client.OpenAI")
+def test_llm_client_server_unreachable(mock_openai_class):
+    """Test LLM client raises error when server is unreachable."""
+    mock_client = MagicMock()
+    mock_client.models.list.side_effect = Exception("Connection refused")
+    mock_openai_class.return_value = mock_client
+
+    with pytest.raises(RuntimeError, match="Cannot connect to MLX server"):
+        LLMClient(model="test-model")
+
+
+@patch.dict("os.environ", {"MLX_SERVER_URL": "http://100.64.0.1:8080"})
+@patch("src.integrations.llm_client.OpenAI")
+def test_classify_email_success(mock_openai_class, mock_label_config):
     """Test successful email classification."""
-    # Mock model verification
-    mock_subprocess.side_effect = [
-        MagicMock(stdout="gpt-oss-20b-MXFP4-Q8\n", returncode=0),  # model list
-        MagicMock(stdout="response-required", returncode=0)  # classification
-    ]
+    # Mock OpenAI client
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = MagicMock(data=[])
 
-    client = LLMClient(model="gpt-oss-20b-MXFP4-Q8")
+    # Mock classification response
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "response-required"
+    mock_client.chat.completions.create.return_value = mock_response
+
+    mock_openai_class.return_value = mock_client
+
+    client = LLMClient(model="test-model")
     result = client.classify_email(
         sender="boss@company.com",
         subject="Urgent: Need your input",
@@ -796,17 +832,25 @@ def test_classify_email_success(mock_subprocess, mock_label_config):
     )
 
     assert result == "response-required"
+    mock_client.chat.completions.create.assert_called_once()
 
 
-@patch("subprocess.run")
-def test_classify_email_invalid_label_uses_default(mock_subprocess, mock_label_config):
+@patch.dict("os.environ", {"MLX_SERVER_URL": "http://100.64.0.1:8080"})
+@patch("src.integrations.llm_client.OpenAI")
+def test_classify_email_invalid_label_uses_default(mock_openai_class, mock_label_config):
     """Test classification falls back to default when LLM returns invalid label."""
-    mock_subprocess.side_effect = [
-        MagicMock(stdout="gpt-oss-20b-MXFP4-Q8\n", returncode=0),
-        MagicMock(stdout="invalid-label", returncode=0)
-    ]
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = MagicMock(data=[])
 
-    client = LLMClient(model="gpt-oss-20b-MXFP4-Q8")
+    # Mock invalid response
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "invalid-label"
+    mock_client.chat.completions.create.return_value = mock_response
+
+    mock_openai_class.return_value = mock_client
+
+    client = LLMClient(model="test-model")
     result = client.classify_email(
         sender="test@example.com",
         subject="Test",
@@ -817,17 +861,19 @@ def test_classify_email_invalid_label_uses_default(mock_subprocess, mock_label_c
     assert result == "fyi"  # default_label
 
 
-@patch("subprocess.run")
-def test_classify_email_timeout(mock_subprocess, mock_label_config):
-    """Test classification handles timeout gracefully."""
-    mock_subprocess.side_effect = [
-        MagicMock(stdout="gpt-oss-20b-MXFP4-Q8\n", returncode=0),
-        subprocess.TimeoutExpired(cmd="llm", timeout=30)
-    ]
+@patch.dict("os.environ", {"MLX_SERVER_URL": "http://100.64.0.1:8080"})
+@patch("src.integrations.llm_client.OpenAI")
+def test_classify_email_server_error(mock_openai_class, mock_label_config):
+    """Test classification handles server errors gracefully."""
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = MagicMock(data=[])
+    mock_client.chat.completions.create.side_effect = Exception("Server error")
 
-    client = LLMClient(model="gpt-oss-20b-MXFP4-Q8")
+    mock_openai_class.return_value = mock_client
 
-    with pytest.raises(RuntimeError, match="timed out"):
+    client = LLMClient(model="test-model")
+
+    with pytest.raises(RuntimeError, match="LLM classification failed"):
         client.classify_email(
             sender="test@example.com",
             subject="Test",
@@ -836,34 +882,282 @@ def test_classify_email_timeout(mock_subprocess, mock_label_config):
         )
 ```
 
-#### 3. MLX Installation Script
-**File**: `scripts/setup_mlx.sh`
-**Changes**: Create helper script for MLX setup
+#### 3. MLX Server Setup Documentation
+**File**: `docs/mlx_server_setup.md`
+**Changes**: Create comprehensive guide for setting up MLX server on macOS
+
+```markdown
+# MLX Server Setup Guide
+
+## Overview
+
+The application uses an MLX server running on your macOS laptop to perform email classification. This guide covers setting up the server and connecting to it from development environments via Tailscale.
+
+## Prerequisites
+
+- **macOS with Apple Silicon** (M1, M2, M3, or M4)
+- **Python 3.12+**
+- **Tailscale** installed on both laptop and development machine
+
+## Part 1: Install MLX Server (On macOS Laptop)
+
+### 1. Install mlx-lm
 
 ```bash
-#!/bin/bash
-# Setup script for MLX LLM integration
+# Create/activate virtual environment (optional but recommended)
+python3.12 -m venv ~/mlx-env
+source ~/mlx-env/bin/activate
 
-set -e
+# Install mlx-lm
+pip install mlx-lm
+```
 
-echo "Setting up MLX for LLM library..."
+### 2. Download Model
 
-# Install llm-mlx plugin
-echo "Installing llm-mlx plugin..."
-llm install llm-mlx
+```bash
+# Start with a small model for testing
+mlx_lm.server --model mlx-community/Llama-3.2-3B-Instruct-4bit
 
-# Verify installation
-echo "Verifying installation..."
-llm models list | grep -q "mlx" && echo "✓ MLX plugin installed" || echo "✗ MLX plugin installation failed"
+# The model will download automatically on first run
+# This may take several minutes depending on your internet speed
+```
 
-# Test with small model first
-echo ""
-echo "To download the configured model (gpt-oss-20b-MXFP4-Q8), run:"
-echo "  llm mlx download gpt-oss-20b-MXFP4-Q8"
-echo ""
-echo "Or to test with a smaller model first:"
-echo "  llm mlx download mlx-community/Llama-3.2-1B-Instruct-4bit"
-echo "  export LLM_MODEL=Llama-3.2-1B-Instruct-4bit"
+**Note**: The server will download and cache the model in `~/.cache/huggingface/`. Subsequent starts will be much faster.
+
+### 3. Configure Tailscale
+
+If you haven't already:
+
+```bash
+# Install Tailscale
+# Download from: https://tailscale.com/download/mac
+
+# Or via Homebrew
+brew install tailscale
+
+# Start and authenticate
+tailscale up
+```
+
+Get your Tailscale IP:
+
+```bash
+tailscale ip -4
+# Example output: 100.64.0.123
+```
+
+### 4. Start MLX Server
+
+```bash
+# Start server accessible over Tailscale
+mlx_lm.server \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit \
+  --host 0.0.0.0 \
+  --port 8080
+
+# You should see:
+# INFO:     Started server process
+# INFO:     Waiting for application startup.
+# INFO:     Application startup complete.
+# INFO:     Uvicorn running on http://0.0.0.0:8080
+```
+
+**Keep this terminal window open** - the server must run continuously.
+
+### 5. Test Server Locally
+
+In a new terminal:
+
+```bash
+curl http://localhost:8080/v1/models
+# Should return list of available models
+```
+
+## Part 2: Connect from Development Environment
+
+### 1. Install Tailscale (Codespaces/Remote Machine)
+
+```bash
+# In GitHub Codespaces or remote Linux machine
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Authenticate
+sudo tailscale up
+
+# Verify connection
+tailscale status
+```
+
+### 2. Test Connection to MLX Server
+
+```bash
+# Replace with your laptop's Tailscale IP
+export MLX_IP=100.64.0.123
+
+# Test connectivity
+curl http://$MLX_IP:8080/v1/models
+
+# Should return the same model list
+```
+
+### 3. Configure Environment
+
+```bash
+# In your project's .env file
+echo "MLX_SERVER_URL=http://100.64.0.123:8080" >> .env
+echo "LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit" >> .env
+```
+
+### 4. Test with Python
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://100.64.0.123:8080/v1",
+    api_key="not-needed"
+)
+
+response = client.chat.completions.create(
+    model="mlx-community/Llama-3.2-3B-Instruct-4bit",
+    messages=[{"role": "user", "content": "Say hello!"}],
+    max_tokens=50
+)
+
+print(response.choices[0].message.content)
+```
+
+## Part 3: Production Setup
+
+### Running as Background Service (Optional)
+
+For continuous operation, use macOS launchd:
+
+**File**: `~/Library/LaunchAgents/com.user.mlx-server.plist`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.mlx-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOUR_USERNAME/mlx-env/bin/mlx_lm.server</string>
+        <string>--model</string>
+        <string>mlx-community/Llama-3.2-3B-Instruct-4bit</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8080</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/mlx-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/mlx-server-error.log</string>
+</dict>
+</plist>
+```
+
+Load the service:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.user.mlx-server.plist
+```
+
+## Troubleshooting
+
+### Server won't start
+
+**Error**: `ImportError: libmlx.so: cannot open shared object`
+**Solution**: MLX only works on macOS. Ensure you're on Apple Silicon Mac.
+
+**Error**: `Address already in use`
+**Solution**: Another process is using port 8080. Kill it or use a different port.
+
+### Can't connect from remote machine
+
+**Problem**: `Connection refused`
+**Solution**:
+1. Verify Tailscale is running on both machines: `tailscale status`
+2. Verify server is listening: `lsof -i :8080` on macOS
+3. Check firewall settings (macOS firewall shouldn't block Tailscale traffic)
+4. Verify you're using the correct Tailscale IP
+
+### Slow inference
+
+**Problem**: Model takes too long to respond
+**Solution**:
+1. Use a smaller model (e.g., Llama-3.2-1B instead of 3B)
+2. Close other applications to free up RAM
+3. Ensure your Mac isn't in low-power mode
+
+### Model download fails
+
+**Problem**: Download interrupted or fails
+**Solution**:
+1. Check internet connection
+2. Clear cache: `rm -rf ~/.cache/huggingface/`
+3. Try downloading manually: `huggingface-cli download mlx-community/Llama-3.2-3B-Instruct-4bit`
+
+## Security Notes
+
+- **Tailscale Security**: Tailscale provides WireGuard-encrypted connections between your devices
+- **No Public Exposure**: The server is only accessible via your Tailscale network, not the public internet
+- **No Authentication**: The MLX server doesn't require API keys (relies on Tailscale for access control)
+- **Device Trust**: Only devices authenticated to your Tailscale network can access the server
+
+## Model Recommendations
+
+| Model | Size | Speed | Quality | Use Case |
+|-------|------|-------|---------|----------|
+| Llama-3.2-1B-Instruct-4bit | ~0.5GB | Very Fast | Good | Development/Testing |
+| Llama-3.2-3B-Instruct-4bit | ~1.5GB | Fast | Better | Production |
+| Mistral-7B-Instruct-v0.3-4bit | ~4GB | Medium | Best | High Accuracy |
+
+All models are available from `mlx-community` on Hugging Face.
+
+## Monitoring
+
+### Check Server Status
+
+```bash
+# On macOS laptop
+curl http://localhost:8080/health
+
+# From remote machine
+curl http://100.64.0.123:8080/health
+```
+
+### View Logs
+
+```bash
+# If running in terminal (Ctrl+C to stop)
+# Logs appear in stdout
+
+# If running as launchd service
+tail -f ~/mlx-server.log
+tail -f ~/mlx-server-error.log
+```
+
+## Alternative: Multiple Models
+
+To run multiple models simultaneously, start multiple servers on different ports:
+
+```bash
+# Terminal 1
+mlx_lm.server --model mlx-community/Llama-3.2-1B-Instruct-4bit --port 8080
+
+# Terminal 2
+mlx_lm.server --model mlx-community/Llama-3.2-3B-Instruct-4bit --port 8081
+```
+
+Then configure different `MLX_SERVER_URL` values for different use cases.
 ```
 
 ### Success Criteria:
@@ -872,16 +1166,49 @@ echo "  export LLM_MODEL=Llama-3.2-1B-Instruct-4bit"
 - [ ] LLM client imports successfully: `python -c "from src.integrations.llm_client import LLMClient"`
 - [ ] Tests pass: `pytest tests/test_llm_client.py -v`
 - [ ] Type checking passes: `mypy src/integrations/llm_client.py`
-- [ ] No linting errors: `ruff src/integrations/llm_client.py`
+- [ ] No linting errors: `ruff check src/integrations/llm_client.py`
+- [ ] OpenAI dependency added: `pip install openai` (add to requirements.txt)
 
-#### Manual Verification:
-- [ ] MLX plugin installs: `llm install llm-mlx`
-- [ ] Model downloads successfully: `llm mlx download gpt-oss-20b-MXFP4-Q8` (or test model)
-- [ ] Model appears in list: `llm models list | grep gpt-oss-20b`
-- [ ] Can classify test prompt: `llm -m gpt-oss-20b-MXFP4-Q8 "Classify this: meeting tomorrow at 3pm. Options: urgent, fyi, transactional"`
-- [ ] Classification response is reasonable and matches expected format
+#### Manual Verification - Server Setup:
+**On macOS Laptop (Server Host)**:
+- [ ] Tailscale installed and authenticated
+- [ ] MLX server (mlx-lm) installed: `pip install mlx-lm`
+- [ ] Server starts successfully: `mlx_lm.server --model mlx-community/Llama-3.2-3B-Instruct-4bit --host 0.0.0.0 --port 8080`
+- [ ] Server is reachable locally: `curl http://localhost:8080/v1/models`
+- [ ] Get Tailscale IP: `tailscale ip -4`
 
-**Implementation Note**: After completing this phase and all automated verification passes, pause here for manual confirmation that LLM integration works correctly with the chosen model before proceeding to Phase 3.
+**In Development Environment (Codespaces)**:
+- [ ] Tailscale installed and authenticated: `sudo tailscale up`
+- [ ] Can reach laptop via Tailscale: `curl http://TAILSCALE_IP:8080/v1/models`
+- [ ] Environment configured: `MLX_SERVER_URL=http://TAILSCALE_IP:8080` in `.env`
+- [ ] Test classification works:
+  ```python
+  from src.integrations.llm_client import LLMClient
+  from src.core.config import Config
+
+  client = LLMClient()
+  result = client.classify_email(
+      sender="test@example.com",
+      subject="Meeting tomorrow",
+      content="Can you make it?",
+      label_config=Config.load_label_config()
+  )
+  print(f"Classification: {result}")
+  ```
+
+#### Documentation:
+- [ ] `docs/mlx_server_setup.md` created with complete setup instructions
+- [ ] `docs/development_environment.md` updated to reflect new architecture
+- [ ] `.env.example` updated with MLX_SERVER_URL configuration
+- [ ] README.md updated if necessary
+
+**Implementation Note**: Phase 2 is considered complete when:
+1. All automated tests pass (with mocked OpenAI client) ✅
+2. Code is properly structured and typed ✅
+3. MLX server can be accessed from development environment via Tailscale ✅
+4. End-to-end email classification works over the network ✅
+
+This architecture enables development in Codespaces while using production-grade MLX on the macOS laptop.
 
 ---
 
