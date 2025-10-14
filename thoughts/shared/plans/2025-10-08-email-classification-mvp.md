@@ -1205,8 +1205,8 @@ Then configure different `MLX_SERVER_URL` values for different use cases.
 **Implementation Note**: Phase 2 is considered complete when:
 1. All automated tests pass (with mocked OpenAI client) ✅
 2. Code is properly structured and typed ✅
-3. MLX server can be accessed from development environment via Tailscale ✅
-4. End-to-end email classification works over the network ✅
+3. MLX server can be accessed from development environment via Tailscale ⏳ (IN PROGRESS)
+4. End-to-end email classification works over the network ⏳ (BLOCKED - depends on step 3)
 
 This architecture enables development in Codespaces while using production-grade MLX on the macOS laptop.
 
