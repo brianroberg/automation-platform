@@ -2,13 +2,13 @@
 
 ## Architecture Overview
 
-This project uses a **client-server architecture** for LLM inference:
+This project uses a **dual-environment strategy** for LLM inference:
 
-- **Server**: MLX server (`mlx-lm.server`) runs on your macOS laptop with Apple Silicon
-- **Client**: Python application (in Codespaces or local) connects to server via Tailscale
-- **Communication**: OpenAI-compatible HTTP API over encrypted Tailscale network
+- **Development**: Together.ai hosted API (or other OpenAI-compatible providers)
+- **Production**: MLX server running locally on macOS laptop
+- **Interface**: Unified OpenAI-compatible client library
 
-This enables development in Linux environments (Codespaces, devcontainers) while leveraging MLX's Apple Silicon optimization.
+This enables fast, flexible development while maintaining production performance on Apple Silicon.
 
 ## Why This Architecture?
 
@@ -25,266 +25,365 @@ If you try to run MLX on Linux, you'll see:
 ImportError: libmlx.so: cannot open shared object file: No such file or directory
 ```
 
-### The Solution
+### The Solution: Dual Environment
 
-Instead of running MLX locally in development environments, we:
+Instead of complex network setups, we use **different providers for different environments**:
 
-1. Run an MLX server on your macOS laptop (where MLX works)
-2. Use Tailscale to create a secure network between your devices
-3. Connect from Codespaces to the laptop-hosted MLX server via HTTP
+#### Development (Codespaces/Linux)
+- **Provider**: Together.ai (recommended) or OpenAI
+- **Setup**: 5 minutes (just get an API key)
+- **Cost**: ~$0.0001 per email (~$4/year for 100 emails/day)
+- **Benefits**:
+  - No local server management
+  - Works anywhere
+  - Fast and reliable
+  - Easy debugging
+
+#### Production (macOS Laptop)
+- **Provider**: MLX server (localhost)
+- **Setup**: 15 minutes (install and start server)
+- **Cost**: Free
+- **Benefits**:
+  - Complete privacy
+  - No ongoing costs
+  - Fast inference
+  - Offline capable
 
 This approach:
-- ✅ Enables development in Codespaces while using production-grade MLX
-- ✅ Maintains development-production parity (same deployment target)
-- ✅ Leverages Tailscale's built-in encryption and authentication
-- ✅ No code changes needed between development and production
+- ✅ No complex networking (Tailscale not needed)
+- ✅ Fast development iteration
+- ✅ Low cost for development
+- ✅ Free production operation
+- ✅ No code changes between environments
 
 ## Quick Start
 
-### 1. Set Up MLX Server (On macOS Laptop)
+### For Development (Codespaces/Linux)
 
-See the comprehensive guide: `docs/mlx_server_setup.md`
+**Recommended**: Use Together.ai
 
-**TL;DR**:
-```bash
-# Install
-pip install mlx-lm
+1. **Sign up for Together.ai**
+   - Visit: https://api.together.xyz/
+   - Create account (requires credit card, but very cheap)
 
-# Install Tailscale
-brew install tailscale
-tailscale up
+2. **Get API Key**
+   - Go to: https://api.together.xyz/settings/api-keys
+   - Create new API key
+   - Copy the key
 
-# Get your Tailscale IP
-tailscale ip -4
-# Example: 100.64.0.123
+3. **Configure Environment**
+   ```bash
+   # Create .env file
+   cp .env.example .env
 
-# Start server
-mlx_lm.server \
-  --model mlx-community/Llama-3.2-3B-Instruct-4bit \
-  --host 0.0.0.0 \
-  --port 8080
-```
+   # Edit .env (or use these commands)
+   cat > .env << 'EOF'
+   # LLM Configuration
+   LLM_BASE_URL=https://api.together.xyz/v1
+   LLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
+   LLM_API_KEY=your-together-api-key-here
 
-Keep this terminal running.
+   # Gmail Configuration
+   GMAIL_CREDENTIALS_FILE=config/gmail_credentials.json
+   GMAIL_TOKEN_FILE=config/gmail_token.json
+   LABEL_CONFIG_FILE=config/labels.json
 
-### 2. Connect from Codespaces
+   # Logging
+   LOG_LEVEL=INFO
+   LOG_FILE=data/logs/email_triage.log
+   EOF
+   ```
 
-```bash
-# Install Tailscale in Codespaces
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
+4. **Test Connection**
+   ```python
+   from src.integrations.llm_client import LLMClient
+   from src.core.config import Config
 
-# Test connection (replace with your laptop's IP)
-curl http://100.64.0.123:8080/v1/models
+   # This will connect to Together.ai
+   client = LLMClient()
 
-# Configure environment
-echo "MLX_SERVER_URL=http://100.64.0.123:8080" >> .env
-echo "LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit" >> .env
-```
+   # Test classification
+   result = client.classify_email(
+       sender="test@example.com",
+       subject="Team meeting tomorrow at 3pm",
+       content="Please confirm you can attend",
+       label_config=Config.load_label_config()
+   )
 
-### 3. Test the Connection
+   print(f"Classified as: {result}")
+   ```
 
-```python
-from src.integrations.llm_client import LLMClient
-from src.core.config import Config
+### For Production (macOS Laptop)
 
-# This will connect to your laptop via Tailscale
-client = LLMClient()
+1. **Install MLX Server**
+   ```bash
+   pip install mlx-lm
+   ```
 
-# Test classification
-result = client.classify_email(
-    sender="test@example.com",
-    subject="Team meeting tomorrow at 3pm",
-    content="Please confirm you can attend",
-    label_config=Config.load_label_config()
-)
+2. **Start Server**
+   ```bash
+   mlx_lm.server \
+     --model mlx-community/Llama-3.2-3B-Instruct-4bit \
+     --port 8080
+   ```
 
-print(f"Classified as: {result}")
-```
+3. **Configure Environment**
+   ```bash
+   # In .env on macOS laptop
+   LLM_BASE_URL=http://localhost:8080/v1
+   LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+   LLM_API_KEY=not-needed
+   ```
+
+See `docs/mlx_server_setup.md` for detailed setup instructions.
 
 ## Environment Configuration
 
 ### Required Environment Variables
 
 ```bash
-# .env file
-MLX_SERVER_URL=http://100.64.0.123:8080  # Your laptop's Tailscale IP
+# Development (.env in Codespaces)
+LLM_BASE_URL=https://api.together.xyz/v1
+LLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
+LLM_API_KEY=your-together-api-key-here
+
+# Production (.env on macOS)
+LLM_BASE_URL=http://localhost:8080/v1
 LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+LLM_API_KEY=not-needed
 ```
 
-### Config.py Changes
+### How It Works
 
-No changes needed! The `LLMClient` reads `MLX_SERVER_URL` from environment:
+The `LLMClient` automatically adapts based on environment variables:
 
 ```python
 # In src/integrations/llm_client.py
-base_url = os.getenv("MLX_SERVER_URL")
+self.base_url = os.getenv("LLM_BASE_URL")
+self.api_key = os.getenv("LLM_API_KEY") or "not-needed"
+self.model = os.getenv("LLM_MODEL")
+
+client = OpenAI(base_url=self.base_url, api_key=self.api_key)
 ```
+
+No code changes needed between environments!
 
 ## Development Workflows
 
-### Scenario 1: Developing in Codespaces
+### Scenario 1: Developing in Codespaces (Recommended)
 
 **Prerequisites**:
-- MLX server running on macOS laptop
-- Tailscale connected on both laptop and Codespaces
+- Together.ai API key
 
 **Workflow**:
-1. Start MLX server on laptop (can run in background)
-2. Open project in Codespaces
-3. Ensure Tailscale is running: `sudo tailscale status`
-4. Configure `.env` with laptop's Tailscale IP
-5. Develop and test normally - LLM calls go over Tailscale
+1. Open project in Codespaces
+2. Create `.env` file with Together.ai configuration
+3. Develop and test normally - LLM calls go to Together.ai API
 
-**Network diagram**:
+**Architecture**:
 ```
 Codespaces (Linux)
-    ↓ Tailscale (encrypted)
-macOS Laptop
-    ↓ localhost
+    ↓ HTTPS API calls
+Together.ai (hosted)
+    ↓
+LLM Model (hosted)
+```
+
+**Benefits**:
+- ✅ No server management
+- ✅ Works immediately
+- ✅ Fast iteration
+- ✅ Low cost (~$0.0001/email)
+
+### Scenario 2: Developing on macOS Locally
+
+Two options when developing on your macOS laptop:
+
+**Option A: Use Together.ai (same as Codespaces)**
+- Keeps configuration consistent with Codespaces
+- Doesn't require running MLX server
+- Good for early development
+
+**Option B: Use MLX locally**
+- Tests production configuration
+- Requires running MLX server
+- Good for final testing before deployment
+
+### Scenario 3: Production Deployment
+
+Production runs on macOS laptop with local MLX server:
+
+```bash
+# In production .env on macOS laptop
+LLM_BASE_URL=http://localhost:8080/v1
+LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+LLM_API_KEY=not-needed
+```
+
+**Architecture**:
+```
+Email Triage Script
+    ↓ HTTP (localhost)
 MLX Server (port 8080)
     ↓
 Local LLM Model
 ```
 
-### Scenario 2: Developing Directly on macOS
-
-If you're developing directly on the macOS laptop:
-
-**Option A: Use localhost**
-```bash
-# .env
-MLX_SERVER_URL=http://localhost:8080
-```
-
-**Option B: Use Tailscale IP (recommended)**
-```bash
-# .env
-MLX_SERVER_URL=http://100.64.0.123:8080  # Your own Tailscale IP
-```
-
-This keeps configuration consistent across environments.
-
-### Scenario 3: Production Deployment
-
-Production runs on the same macOS laptop as development:
-
-```bash
-# In production .env
-MLX_SERVER_URL=http://localhost:8080
-```
-
-Or keep using Tailscale IP - works the same!
+**Benefits**:
+- ✅ Free operation
+- ✅ Complete privacy
+- ✅ Fast inference
+- ✅ Works offline
 
 ## Troubleshooting
 
-### Cannot connect to MLX server
+### Together.ai Issues
 
-**Error**: `Cannot connect to MLX server at http://100.64.0.123:8080`
+**Error**: `Cannot connect to LLM API`
+- **Solution**: Check your API key is correct and has credits
+- **Test**: `curl https://api.together.xyz/v1/models -H "Authorization: Bearer your-key"`
 
-**Solutions**:
-1. Check MLX server is running on laptop
-2. Verify Tailscale is connected on both devices: `tailscale status`
-3. Test with curl: `curl http://100.64.0.123:8080/v1/models`
-4. Check firewall isn't blocking (macOS firewall should allow Tailscale)
+**Error**: `Authentication failed`
+- **Solution**: Verify API key in `.env` file matches your Together.ai dashboard
 
-### Server returns errors
+**Error**: `Rate limit exceeded`
+- **Solution**: Wait a moment or upgrade your Together.ai plan
+- **Note**: Free tier has generous limits for email classification
 
-**Error**: Various HTTP errors from MLX server
+**Error**: `Model not found`
+- **Solution**: Verify model name. See available models at: https://docs.together.ai/docs/inference-models
+- **Recommended**: Use `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo`
 
-**Solutions**:
-1. Check server logs on macOS laptop (in terminal where server is running)
-2. Verify model name matches what server has loaded
-3. Try restarting MLX server
-4. Check if model downloaded successfully: `ls ~/.cache/huggingface/`
+### MLX Server Issues
 
-### Tailscale authentication issues
+**Error**: `Cannot connect to LLM API at http://localhost:8080`
+- **Solution**: Ensure MLX server is running
+- **Test**: `curl http://localhost:8080/v1/models`
+- **Start server**: `mlx_lm.server --model mlx-community/Llama-3.2-3B-Instruct-4bit`
 
-**Error**: `sudo: tailscale: command not found` or connection fails
+**Error**: `ImportError: libmlx.so: cannot open shared object file`
+- **Solution**: MLX only works on macOS with Apple Silicon
+- **For development**: Use Together.ai instead (see above)
 
-**Solutions**:
+**Error**: `Server returns errors`
+- **Solution**: Check server logs in terminal where server is running
+- **Solution**: Verify model name matches what server has loaded
+- **Solution**: Try restarting MLX server
+
+**Error**: `Model download fails`
+- **Solution**: Check internet connection
+- **Solution**: Clear cache: `rm -rf ~/.cache/huggingface/`
+- **Solution**: Try downloading manually: `huggingface-cli download mlx-community/Llama-3.2-3B-Instruct-4bit`
+
+### Performance Issues
+
+**Problem**: Slow classification (Together.ai)
+- **Expected**: 100-300ms per email
+- **Solution**: Check your internet connection
+- **Solution**: Try different region if available
+
+**Problem**: Slow classification (MLX)
+- **Expected**: 50-200ms per email
+- **Solution**: Use smaller model (1B instead of 3B)
+- **Solution**: Close other applications to free RAM
+- **Solution**: Ensure Mac isn't in low-power mode
+
+### Configuration Issues
+
+**Error**: `LLM_BASE_URL environment variable must be set`
+- **Solution**: Copy `.env.example` to `.env` and configure it
+- **Check**: Environment file exists and is named `.env` (not `.env.txt`)
+
+**Error**: `Invalid label returned by LLM`
+- **Problem**: Model not following classification instructions
+- **Solution**: Edit label descriptions in `config/labels.json` to be more specific
+- **Solution**: Try different model (GPT-4o-mini on OpenAI is more reliable)
+
+## Alternative Providers
+
+The LLMClient supports any OpenAI-compatible API. Here are more options:
+
+### OpenAI
+
 ```bash
-# Reinstall Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Authenticate (opens browser)
-sudo tailscale up
-
-# Verify
-tailscale status
-tailscale ip -4
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+LLM_API_KEY=your-openai-api-key
 ```
 
-### Slow responses
+**Pros**: Highest quality, most reliable
+**Cons**: More expensive (~5x Together.ai cost)
 
-**Problem**: LLM takes too long to respond
+### Anthropic (via proxy)
 
-**Solutions**:
-1. Use smaller model (Llama-3.2-1B instead of 3B)
-2. Check laptop isn't in low-power mode
-3. Close other applications on laptop
-4. Network latency (Tailscale should be <10ms on same network)
+Requires OpenAI-compatible proxy like LiteLLM:
 
-## Alternative Development Approaches
+```bash
+# First, run LiteLLM proxy locally
+# pip install litellm
+# litellm --model claude-3-sonnet-20240229
 
-### Option 1: Use OpenAI During Development
-
-If you have an OpenAI API key:
-
-```python
-# Temporary: just for testing without MLX server
-from openai import OpenAI
-
-client = OpenAI(api_key="your-key")
-response = client.chat.completions.create(
-    model="gpt-4o-mini",
-    messages=[{"role": "user", "content": "test"}]
-)
+LLM_BASE_URL=http://localhost:8000/v1
+LLM_MODEL=claude-3-sonnet-20240229
+LLM_API_KEY=your-anthropic-api-key
 ```
 
-**Pros**: Works anywhere, fast
-**Cons**: Costs money, not production environment
+### Ollama (local, alternative to MLX)
 
-### Option 2: Mock in Tests
+```bash
+# First, install and start Ollama
+# curl -fsSL https://ollama.com/install.sh | sh
+# ollama serve
+# ollama pull llama3.2
 
-For unit testing without network dependency:
-
-```python
-@patch("src.integrations.llm_client.OpenAI")
-def test_classification(mock_openai):
-    # Mock the OpenAI client
-    mock_client = MagicMock()
-    mock_openai.return_value = mock_client
-
-    # Test without network
-    # ... your test code
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=llama3.2
+LLM_API_KEY=not-needed
 ```
 
-Our existing tests already do this!
+**Pros**: Free, works on Linux/macOS/Windows
+**Cons**: Slower than MLX on Apple Silicon
 
 ## Security Considerations
 
-### Tailscale Security
+### Together.ai (Development)
 
-- **Encryption**: All traffic is encrypted via WireGuard
-- **Authentication**: Only devices in your Tailscale network can connect
-- **No Public Exposure**: Server is not accessible from internet
-- **Zero Trust**: Each device authenticates independently
+- ✅ SOC 2 Type II certified
+- ✅ Data not used for model training
+- ✅ HTTPS encryption in transit
+- ✅ API key authentication
+- ⚠️ Data leaves your infrastructure
+- ⚠️ Subject to provider's terms of service
 
-### MLX Server Security
+**Best Practices**:
+- Store API keys in `.env` file (never commit to git)
+- Use separate API keys for development and production (if using Together.ai in prod)
+- Rotate API keys periodically
+- Monitor usage and costs
 
-- **No API Key**: Server doesn't require authentication (relies on Tailscale)
-- **Read-Only**: Server only performs inference, doesn't modify data
-- **Local Models**: All data stays within your Tailscale network
-- **Not Production-Ready**: mlx-lm.server documentation warns it's not hardened for public exposure (but fine for Tailscale use)
+### MLX Server (Production)
 
-### Best Practices
+- ✅ All data stays on your laptop
+- ✅ No internet required after model download
+- ✅ Complete privacy
+- ✅ No API key needed
+- ⚠️ Server not hardened for public exposure (fine for localhost)
 
-1. ✅ **Always use Tailscale**: Don't expose port 8080 to public internet
-2. ✅ **Keep Tailscale updated**: `tailscale update`
-3. ✅ **Monitor access**: Check who's connected: `tailscale status`
-4. ✅ **Use ACLs**: Configure Tailscale ACLs for fine-grained access control
-5. ❌ **Don't**: Bind to `0.0.0.0` without Tailscale (security risk)
+**Best Practices**:
+- Only bind to `localhost` (not `0.0.0.0`) unless needed
+- Don't expose port 8080 to internet
+- Keep macOS firewall enabled
+- Regular OS security updates
+
+### Data Privacy Comparison
+
+| Provider | Data Location | Training Usage | Internet Required | Privacy Level |
+|----------|---------------|----------------|-------------------|---------------|
+| Together.ai | Third-party servers | No | Yes | Medium |
+| OpenAI | Third-party servers | No (as of Mar 2023) | Yes | Medium |
+| MLX (local) | Your laptop only | N/A | No* | High |
+
+*Internet required only for initial model download
 
 ## Performance Considerations
 
@@ -315,35 +414,53 @@ For production at scale, consider:
 
 ## FAQ
 
-**Q: Do I need to keep the MLX server running all the time?**
-A: Only when developing. You can stop it when not working on the project. For production, set up as a launchd service (see `docs/mlx_server_setup.md`).
+**Q: Do I need a Together.ai account for development?**
+A: Yes, for the recommended setup. Alternatively, use OpenAI or run MLX server locally.
 
-**Q: Can multiple people share one MLX server?**
-A: Yes, if they're all on your Tailscale network. The server handles one request at a time, so it may be slower with multiple users.
+**Q: How much does Together.ai cost?**
+A: Very cheap! About $0.0001 per email (~$4/year for 100 emails/day).
 
-**Q: What if my laptop goes to sleep?**
-A: The server will stop responding. Wake your laptop or configure it to not sleep while plugged in.
+**Q: Can I develop without any API costs?**
+A: Yes, if you have a Mac with Apple Silicon. Run MLX server locally and use it for development too.
 
-**Q: Can I use this architecture in production?**
-A: Yes! The production deployment is the same macOS laptop. Just use `localhost` instead of Tailscale IP in production config.
+**Q: What if I don't have a Mac for production?**
+A: Use Together.ai or OpenAI for both development and production. Just set the same config in both environments.
 
-**Q: What about CI/CD?**
-A: Mock the LLM client in tests (we already do this). CI doesn't need the actual MLX server.
+**Q: Can I use this in CI/CD?**
+A: Yes! The tests mock the LLM client, so no API key or server needed for automated testing.
 
-**Q: Can I use a different LLM provider?**
-A: Yes! Just change the `MLX_SERVER_URL` to point to any OpenAI-compatible API (OpenAI, Anthropic, Ollama, etc.). The code is provider-agnostic.
+**Q: What about data privacy?**
+A: Development (Together.ai): Data sent to third-party. Production (MLX): All data stays on your laptop.
+
+**Q: Can I switch providers later?**
+A: Yes! Just update the `.env` file. No code changes needed. The LLMClient works with any OpenAI-compatible API.
+
+**Q: Do I need Tailscale?**
+A: No! The new dual-environment approach doesn't require Tailscale. Just use Together.ai for dev and MLX for prod.
 
 ## Next Steps
 
-1. ✅ Set up MLX server on macOS laptop (see `docs/mlx_server_setup.md`)
-2. ✅ Configure Tailscale on both devices
-3. ✅ Update `.env` with Tailscale IP
-4. ✅ Test connection with provided Python snippet
-5. ✅ Proceed with development!
+### For Development (Recommended Path)
+
+1. ✅ Sign up for Together.ai account
+2. ✅ Get API key from dashboard
+3. ✅ Create `.env` file with Together.ai configuration
+4. ✅ Test connection (see Quick Start section above)
+5. ✅ Proceed with Phase 3: Gmail Integration
+
+### For Production (Later)
+
+1. ✅ Install MLX server on macOS laptop
+2. ✅ Download and test model
+3. ✅ Update `.env` for production
+4. ✅ Test end-to-end workflow
+
+See `docs/llm_configuration.md` for comprehensive setup guide.
 
 ## Additional Resources
 
+- **Together.ai Documentation**: https://docs.together.ai/
+- **Together.ai Pricing**: https://www.together.ai/pricing
 - **MLX Documentation**: https://ml-explore.github.io/mlx/
 - **mlx-lm Server**: https://github.com/ml-explore/mlx-lm
-- **Tailscale Docs**: https://tailscale.com/kb/
 - **OpenAI API Reference**: https://platform.openai.com/docs/api-reference (our API is compatible)

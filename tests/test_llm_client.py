@@ -32,7 +32,7 @@ def mock_label_config():
 @pytest.fixture
 def mock_env_vars(monkeypatch):
     """Set required environment variables for testing."""
-    monkeypatch.setenv("MLX_SERVER_URL", "http://test-server:8080")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test-server:8080/v1")
 
 
 @patch("src.integrations.llm_client.OpenAI")
@@ -50,7 +50,7 @@ def test_llm_client_initialization(mock_openai_class, mock_env_vars):
     client = LLMClient(model="test-model")
 
     assert client.model == "test-model"
-    assert client.base_url == "http://test-server:8080"
+    assert client.base_url == "http://test-server:8080/v1"
     mock_openai_class.assert_called_once_with(
         base_url="http://test-server:8080/v1",
         api_key="not-needed"
@@ -59,9 +59,9 @@ def test_llm_client_initialization(mock_openai_class, mock_env_vars):
 
 
 def test_llm_client_missing_server_url():
-    """Test LLM client raises error when MLX_SERVER_URL not set."""
+    """Test LLM client raises error when LLM_BASE_URL not set."""
     with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(ValueError, match="MLX_SERVER_URL environment variable must be set"):
+        with pytest.raises(ValueError, match="LLM_BASE_URL environment variable must be set"):
             LLMClient(model="test-model")
 
 
@@ -72,7 +72,7 @@ def test_llm_client_server_not_reachable(mock_openai_class, mock_env_vars):
     mock_openai_class.return_value = mock_client
     mock_client.models.list.side_effect = Exception("Connection refused")
 
-    with pytest.raises(RuntimeError, match="Cannot connect to MLX server"):
+    with pytest.raises(RuntimeError, match="Cannot connect to LLM API"):
         LLMClient(model="test-model")
 
 
