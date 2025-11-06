@@ -57,7 +57,7 @@ Build a modular Python automation framework running locally on Mac with containe
 ### MVP Scope: Email Classification Workflow
 
 The MVP successfully:
-1. Connects to Gmail API with restricted OAuth scopes (`gmail.readonly` + `gmail.labels`)
+1. Connects to Gmail API with OAuth scopes (`openid`, `https://www.googleapis.com/auth/userinfo.email`, `https://www.googleapis.com/auth/gmail.modify`)
 2. Fetches unread emails from inbox
 3. Classifies emails using LLM (via provider-agnostic client, with MLX as the default deployment)
 4. Applies appropriate Gmail labels based on classification
@@ -66,9 +66,9 @@ The MVP successfully:
 
 **Security Constraints**:
 - Cannot send emails (scopes exclude `gmail.send`)
-- Cannot modify email content (readonly access only)
-- Cannot delete emails
-- Limited to label management and reading
+- Cannot create drafts (`gmail.compose` not granted)
+- Cannot permanently delete emails (no full mail.google.com scope)
+- Limited to reading and modifying message metadata (labels, read/unread, archive)
 
 ## Current Implementation Status
 
@@ -78,7 +78,7 @@ The MVP successfully:
 - **Status**: Production-ready
 - **Features**:
   - Environment variable management via python-dotenv
-  - Gmail OAuth scope definitions (`gmail.readonly`, `gmail.labels`)
+  - Gmail OAuth scope definitions (`openid`, `https://www.googleapis.com/auth/userinfo.email`, `https://www.googleapis.com/auth/gmail.modify`)
   - LLM provider configuration (base_url, model, api_key)
   - Label configuration loading from JSON
   - Automatic directory creation for config/ and logs/
@@ -395,13 +395,14 @@ automation-platform/
 ### Security Model
 
 **OAuth Scopes** (Minimal Permissions):
-- `https://www.googleapis.com/auth/gmail.readonly` - Read emails only
-- `https://www.googleapis.com/auth/gmail.labels` - Manage labels only
+- `openid` - Basic profile identity
+- `https://www.googleapis.com/auth/userinfo.email` - Access to account email address
+- `https://www.googleapis.com/auth/gmail.modify` - Read and modify messages/labels
 
 **Explicitly Excluded**:
 - ❌ `gmail.send` - Cannot send emails
 - ❌ `gmail.compose` - Cannot create drafts
-- ❌ `gmail.modify` - Cannot delete or modify email content
+- ❌ `mail.google.com` - No unrestricted Gmail access
 
 **Credential Storage**:
 - Gmail credentials: `config/gmail_credentials.json` (user-provided, not committed)

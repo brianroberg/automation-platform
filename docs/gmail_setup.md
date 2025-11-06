@@ -36,8 +36,9 @@
 
 6. Click "Add or Remove Scopes"
 7. Add these scopes:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.labels`
+   - `openid`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/gmail.modify`
 8. Click "Update" → "Save and Continue"
 
 9. Add your email as a test user:
@@ -67,7 +68,7 @@ When you run the email triage workflow for the first time:
 3. You may see a warning "Google hasn't verified this app"
    - Click "Advanced"
    - Click "Go to Automation Platform (unsafe)"
-4. Review the permissions (readonly + labels only)
+4. Review the permissions (basic profile + Gmail modify)
 5. Click "Allow"
 6. You should see "The authentication flow has completed"
 7. Close the browser window
@@ -75,15 +76,14 @@ When you run the email triage workflow for the first time:
 
 ## Security Notes
 
-**Restricted Scopes**: The application only has permission to:
-- ✅ Read your emails (cannot modify or delete)
-- ✅ Manage labels (create and apply labels)
+**Scopes Granted**:
+- ✅ Basic profile info (`openid`, `userinfo.email`)
+- ✅ Read, label, archive, and modify Gmail messages (`gmail.modify`)
+- ✅ Underlying API access to compose/send endpoints (Google bundles this with `gmail.modify`)
 
-**No Send Permission**: The application CANNOT:
-- ❌ Send emails on your behalf
-- ❌ Delete emails
-- ❌ Modify email content
-- ❌ Access gmail.compose or gmail.send
+**What the workflow actually does**:
+- 🚫 Does **not** call message send or draft endpoints
+- ✅ Only reads messages, classifies them, and applies/updates labels or read state
 
 **Local Storage**:
 - Credentials stored locally in `config/` directory

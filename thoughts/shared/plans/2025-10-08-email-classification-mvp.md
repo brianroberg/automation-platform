@@ -14,7 +14,7 @@ Build a working email classification system that connects to Gmail, classifies u
 - **Target Platform**: macOS (Apple Silicon optimized)
 - **Python Version**: 3.12+
 - **LLM Model**: `mlx-community/gpt-oss-20b-MXFP4-Q8` (subject to experimentation)
-- **Gmail OAuth Scopes**: `gmail.readonly` + `gmail.labels` (most restrictive)
+- **Gmail OAuth Scopes**: `openid`, `https://www.googleapis.com/auth/userinfo.email`, `https://www.googleapis.com/auth/gmail.modify`
 - **Label Categories**: `response-required`, `fyi`, `transactional` (externally configurable)
 - **Classification Inputs**: Sender, subject, body content
 - **Error Philosophy**: Unix-style (fail loudly on errors, quiet on success, info/debug logging available)
@@ -198,8 +198,9 @@ class Config:
     GMAIL_CREDENTIALS_FILE = CONFIG_DIR / os.getenv("GMAIL_CREDENTIALS_FILE", "config/gmail_credentials.json")
     GMAIL_TOKEN_FILE = CONFIG_DIR / os.getenv("GMAIL_TOKEN_FILE", "config/gmail_token.json")
     GMAIL_SCOPES = [
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.labels"
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/gmail.modify"
     ]
 
     # LLM Configuration
@@ -1242,7 +1243,7 @@ logger = logging.getLogger(__name__)
 class GmailClient:
     """Client for interacting with Gmail API."""
 
-    # Restricted scopes - read-only + labels only
+    # Required scopes - basic identity + Gmail modify
     SCOPES = Config.GMAIL_SCOPES
 
     def __init__(self):
@@ -1254,11 +1255,11 @@ class GmailClient:
     def _authenticate(self) -> None:
         """Authenticate with Gmail API using OAuth.
 
-        Uses restricted scopes:
-        - gmail.readonly: Read emails only
-        - gmail.labels: Manage labels only
+        Uses scopes:
+        - openid / userinfo.email: Basic profile identity
+        - gmail.modify: Read, label, archive, and mark messages
 
-        No permission to send, delete, or modify email content.
+        No permission to send email or create drafts.
 
         Raises:
             FileNotFoundError: If credentials file not found
@@ -1639,8 +1640,9 @@ def test_apply_label_creates_if_not_exists(mock_exists, mock_creds, mock_build, 
 5. Click "Save and Continue"
 6. Click "Add or Remove Scopes"
 7. Add these scopes:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.labels`
+   - `openid`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/gmail.modify`
 8. Click "Update" → "Save and Continue"
 9. Add your email as a test user
 10. Click "Save and Continue"

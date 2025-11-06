@@ -54,7 +54,7 @@ Complete the Email Classification MVP by implementing Gmail integration, email t
 
 A working command-line MVP that:
 
-1. ✅ Authenticates with Gmail API using OAuth (restricted scopes: `gmail.readonly` + `gmail.labels`)
+1. ✅ Authenticates with Gmail API using OAuth (scopes: `openid`, `userinfo.email`, `gmail.modify`)
 2. ✅ Fetches unread emails from inbox
 3. ✅ Classifies emails using an MLX-hosted LLM reachable from both development and production environments
 4. ✅ Applies appropriate Gmail labels based on classification
@@ -95,7 +95,7 @@ Each phase includes both automated and manual verification before proceeding.
 
 ### Overview
 
-Implement Gmail API client with OAuth authentication (restricted scopes), email fetching, and label management. This phase establishes the connection to Gmail and provides the data source for email classification.
+Implement Gmail API client with OAuth authentication (openid + userinfo.email + gmail.modify), email fetching, and label management. This phase establishes the connection to Gmail and provides the data source for email classification.
 
 ### Changes Required:
 
@@ -122,7 +122,7 @@ logger = logging.getLogger(__name__)
 
 
 class GmailClient:
-    """Client for interacting with Gmail API with restricted scopes."""
+    """Client for interacting with Gmail API using modify-level access."""
 
     SCOPES = Config.GMAIL_SCOPES
 
@@ -135,11 +135,11 @@ class GmailClient:
     def _authenticate(self) -> None:
         """Authenticate with Gmail API using OAuth.
 
-        Uses restricted scopes:
-        - gmail.readonly: Read emails only
-        - gmail.labels: Manage labels only
+        Uses scopes:
+        - openid / userinfo.email: Basic profile identity
+        - gmail.modify: Read and modify messages (labels, read state, archive)
 
-        No permission to send, delete, or modify email content.
+        No permission to send email or create drafts.
 
         Raises:
             FileNotFoundError: If credentials file not found
@@ -564,8 +564,9 @@ def test_get_unread_emails_returns_empty_list_when_no_emails(mock_exists, mock_c
 
 6. Click "Add or Remove Scopes"
 7. Add these scopes:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.labels`
+   - `openid`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/gmail.modify`
 8. Click "Update" → "Save and Continue"
 
 9. Add your email as a test user:
@@ -709,21 +710,21 @@ After completing Gmail setup:
 #### Manual Verification:
 
 **Prerequisites Setup:**
-- [ ] Google Cloud project created
-- [ ] Gmail API enabled
-- [ ] OAuth consent screen configured (External, Testing mode)
-- [ ] Your email added as test user
-- [ ] OAuth credentials downloaded to `config/gmail_credentials.json`
+- [x] Google Cloud project created
+- [x] Gmail API enabled
+- [x] OAuth consent screen configured (External, Testing mode)
+- [x] Your email added as test user
+- [x] OAuth credentials downloaded to `config/gmail_credentials.json`
 
 **Authentication Testing:**
-- [ ] Can instantiate `GmailClient()` without errors
-- [ ] OAuth flow opens browser automatically
-- [ ] Can complete authentication (click "Allow" after viewing permissions)
-- [ ] Token saved to `config/gmail_token.json`
-- [ ] Subsequent runs use saved token (no browser popup)
+- [x] Can instantiate `GmailClient()` without errors
+- [x] OAuth flow opens browser automatically
+- [x] Can complete authentication (click "Allow" after viewing permissions)
+- [x] Token saved to `config/gmail_token.json`
+- [x] Subsequent runs use saved token (no browser popup)
 
 **Functionality Testing:**
-- [ ] Can fetch unread emails:
+- [x] Can fetch unread emails:
   ```python
   from src.integrations.gmail_client import GmailClient
   client = GmailClient()
@@ -732,14 +733,14 @@ After completing Gmail setup:
   for email in emails:
       print(f"- {email['subject']}")
   ```
-- [ ] Email data structure is correct (id, sender, subject, content, snippet)
-- [ ] Can create and apply labels:
+- [x] Email data structure is correct (id, sender, subject, content, snippet)
+- [x] Can create and apply labels:
   ```python
   if emails:
       client.apply_label(emails[0]['id'], 'test-label')
       print("Label applied successfully")
   ```
-- [ ] Label appears in Gmail web interface
+- [x] Label appears in Gmail web interface
 - [ ] Token automatically refreshes when expired (test after several days)
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause here for manual confirmation that Gmail integration works correctly with your account before proceeding to Phase 4.
@@ -1170,9 +1171,9 @@ LOG_FILE=data/logs/email_triage.log
 #### Manual Verification:
 
 **Environment Setup:**
-- [ ] `.env` file created with MLX server connection details
-- [ ] `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` configured
-- [ ] Gmail credentials from Phase 3 still valid
+- [x] `.env` file created with MLX server connection details
+- [x] `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` configured
+- [x] Gmail credentials from Phase 3 still valid
 
 **Dry Run Testing:**
 - [ ] Can run workflow in dry-run mode: `python -c "from src.workflows.email_triage import EmailTriageWorkflow; w = EmailTriageWorkflow(); stats = w.run(max_emails=5, dry_run=True); print(stats)"`
@@ -1235,12 +1236,14 @@ def test_config_has_required_attributes():
     assert hasattr(Config, "LOG_LEVEL")
 
 
-def test_gmail_scopes_are_restricted():
-    """Test Gmail scopes are correctly restricted."""
-    assert "gmail.readonly" in Config.GMAIL_SCOPES[0]
-    assert "gmail.labels" in Config.GMAIL_SCOPES[1]
+def test_gmail_scopes_are_expected():
+    """Test Gmail scopes match the configured set."""
+    scopes = set(Config.GMAIL_SCOPES)
+    assert "openid" in scopes
+    assert "https://www.googleapis.com/auth/userinfo.email" in scopes
+    assert "https://www.googleapis.com/auth/gmail.modify" in scopes
     # Ensure no send/compose permissions
-    for scope in Config.GMAIL_SCOPES:
+    for scope in scopes:
         assert "send" not in scope.lower()
         assert "compose" not in scope.lower()
 
@@ -1416,7 +1419,7 @@ Edit `config/labels.json` to define your own classification categories:
 - **Solution**:
   1. Ensure OAuth consent screen is in "Testing" mode
   2. Add your email as a test user
-  3. Verify both scopes are configured (gmail.readonly + gmail.labels)
+  3. Verify all required scopes are configured (`openid`, `https://www.googleapis.com/auth/userinfo.email`, `https://www.googleapis.com/auth/gmail.modify`)
 
 **Problem**: Browser doesn't open for OAuth
 - **Solution** (Codespaces): Copy the URL from terminal and open in your local browser
@@ -1725,7 +1728,7 @@ Complete these steps in order:
 This implementation plan provides a complete roadmap to finish the Email Classification MVP:
 
 **Phase 3: Gmail Integration** (2-3 days)
-- OAuth authentication with restricted scopes
+- OAuth authentication with required scopes (`openid`, `userinfo.email`, `gmail.modify`)
 - Email fetching and parsing
 - Label management
 - Comprehensive testing

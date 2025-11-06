@@ -29,8 +29,9 @@ class Config:
     )
     GMAIL_TOKEN_FILE = PROJECT_ROOT / os.getenv("GMAIL_TOKEN_FILE", "config/gmail_token.json")
     GMAIL_SCOPES = [
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.labels"
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/gmail.modify"
     ]
 
     # LLM Configuration

@@ -151,21 +151,19 @@ automation-platform/
 - **Configuration**: Model selection via environment variables [MVP]
 
 ### Gmail API Integration
-**OAuth Scopes (Restricted - MVP):**
-- `https://www.googleapis.com/auth/gmail.readonly` - Read-only access to emails [MVP]
-- `https://www.googleapis.com/auth/gmail.labels` - Label management only [MVP]
-
-**Alternative (More Permissive - Only if needed):**
-- `https://www.googleapis.com/auth/gmail.modify` - All read/write operations [DEFERRED - only add if readonly+labels insufficient]
+**OAuth Scopes (MVP):**
+- `openid` - Basic profile identity [MVP]
+- `https://www.googleapis.com/auth/userinfo.email` - Access to account email address [MVP]
+- `https://www.googleapis.com/auth/gmail.modify` - Read and modify Gmail messages and labels [MVP]
 
 **Explicitly Excluded:**
 - `gmail.send` - Sending email (NOT GRANTED)
 - `gmail.compose` - Creating/sending drafts (NOT GRANTED)
 
 **Security Note**: 
-- Application can only read emails and manage labels
-- Cannot modify email content, delete emails, or send messages
-- Most restrictive scopes that still allow the email classification use case
+- Application can read, label, archive, and mark messages as read/unread
+- Cannot send messages or create drafts
+- No direct access to compose/send scopes; only metadata modifications needed for triage
 
 ### Development Environment
 - **Primary**: Python venv initially [MVP], Docker Desktop later [DEFERRED]
