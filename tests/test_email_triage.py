@@ -82,7 +82,8 @@ def test_workflow_dry_run_skips_label_application(
     mock_load_config,
     mock_emails,
     mock_label_config,
-):
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Dry run should classify without applying labels."""
     mock_load_config.return_value = mock_label_config
 
@@ -100,6 +101,8 @@ def test_workflow_dry_run_skips_label_application(
     assert stats["processed"] == 1
     assert stats["succeeded"] == 1
     mock_gmail_client.apply_label.assert_not_called()
+    captured = capsys.readouterr().out
+    assert "would be labeled" in captured
 
 
 @patch("src.workflows.email_triage.Config.load_label_config")
@@ -129,3 +132,33 @@ def test_workflow_handles_email_failure(
     assert stats["processed"] == 2
     assert stats["succeeded"] == 1
     assert stats["failed"] == 1
+
+
+@patch("src.workflows.email_triage.Config.load_label_config")
+@patch("src.workflows.email_triage.GmailClient")
+@patch("src.workflows.email_triage.LLMClient")
+def test_workflow_verbose_outputs_status(
+    mock_llm_client_cls,
+    mock_gmail_client_cls,
+    mock_load_config,
+    mock_emails,
+    mock_label_config,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verbose mode should print applied labels."""
+    mock_load_config.return_value = mock_label_config
+
+    mock_gmail_client = MagicMock()
+    mock_gmail_client.get_unread_emails.return_value = [mock_emails[0]]
+    mock_gmail_client_cls.return_value = mock_gmail_client
+
+    mock_llm_client = MagicMock()
+    mock_llm_client.classify_email.return_value = "response-required"
+    mock_llm_client_cls.return_value = mock_llm_client
+
+    workflow = EmailTriageWorkflow()
+    workflow.run(max_emails=1, dry_run=False, verbose=True)
+
+    captured = capsys.readouterr().out
+    assert "labeled 'response-required'" in captured
+    mock_gmail_client.apply_label.assert_called_once_with("msg_1", "response-required")

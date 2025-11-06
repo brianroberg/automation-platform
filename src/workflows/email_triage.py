@@ -1,6 +1,7 @@
 """Email triage workflow - classifies and labels Gmail emails using LLM."""
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from typing import Any
@@ -32,17 +33,23 @@ class EmailTriageWorkflow:
             logger.error("Failed to initialize workflow: %s", exc)
             raise
 
-    def run(self, max_emails: int = 10, dry_run: bool = False) -> dict[str, Any]:
+    def run(self, max_emails: int = 10, dry_run: bool = False, verbose: bool = False) -> dict[str, Any]:
         """Run the workflow, returning summary statistics.
 
         Args:
             max_emails: Maximum number of unread emails to process.
             dry_run: When True, skip applying labels (classification only).
+            verbose: When True, print per-email results to stdout.
 
         Returns:
             Summary statistics for the run.
         """
-        logger.info("Starting email triage (max_emails=%s, dry_run=%s)", max_emails, dry_run)
+        logger.info(
+            "Starting email triage (max_emails=%s, dry_run=%s, verbose=%s)",
+            max_emails,
+            dry_run,
+            verbose,
+        )
 
         stats: dict[str, Any] = {
             "processed": 0,
@@ -52,6 +59,10 @@ class EmailTriageWorkflow:
         }
 
         try:
+            if max_emails <= 0:
+                logger.info("Max emails set to %s; nothing to do.", max_emails)
+                return stats
+
             emails = self.gmail_client.get_unread_emails(max_results=max_emails)
             if not emails:
                 logger.info("No unread emails found")
@@ -67,6 +78,10 @@ class EmailTriageWorkflow:
                 except Exception as exc:  # Broad catch ensures one bad email does not stop run
                     logger.error("Failed to process email %s: %s", email.get("id"), exc)
                     stats["failed"] += 1
+                    if verbose:
+                        print(
+                            f"[ERROR] Email {email.get('id', 'unknown')} failed: {exc}"
+                        )
                     continue
 
                 if success:
@@ -76,8 +91,22 @@ class EmailTriageWorkflow:
                         stats["classifications"][classification] = (
                             stats["classifications"].get(classification, 0) + 1
                         )
+                        if dry_run:
+                            print(
+                                f"[DRY RUN] Email '{email.get('subject', '')}' "
+                                f"(id={email.get('id')}) would be labeled '{classification}'"
+                            )
+                        elif verbose:
+                            print(
+                                f"[APPLIED] Email '{email.get('subject', '')}' "
+                                f"(id={email.get('id')}) labeled '{classification}'"
+                            )
                 else:
                     stats["failed"] += 1
+                    if verbose:
+                        print(
+                            f"[ERROR] Email {email.get('id', 'unknown')} failed to process."
+                        )
 
             logger.info(
                 "Email triage complete: %s/%s succeeded, %s failed",
@@ -122,8 +151,35 @@ class EmailTriageWorkflow:
         return True
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the workflow."""
+    parser = argparse.ArgumentParser(
+        description="Classify unread Gmail messages and apply labels."
+    )
+    parser.add_argument(
+        "-n",
+        "--num-messages",
+        type=int,
+        default=10,
+        help="Maximum number of unread emails to process (default: 10).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Classify emails without applying labels; print the labels that would be applied.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print the result of processing each email.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
     """Command-line entry point for running the email triage workflow."""
+    args = parse_args(argv)
     setup_logging()
 
     logger.info("=" * 60)
@@ -132,7 +188,11 @@ def main() -> int:
 
     try:
         workflow = EmailTriageWorkflow()
-        workflow.run(max_emails=10, dry_run=False)
+        workflow.run(
+            max_emails=args.num_messages,
+            dry_run=args.dry_run,
+            verbose=args.verbose or args.dry_run,
+        )
         logger.info("Email triage completed successfully")
         return 0
     except KeyboardInterrupt:

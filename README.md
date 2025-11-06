@@ -75,6 +75,13 @@ source venv/bin/activate
 
 # Run email classification
 python -m src.workflows.email_triage
+
+# Examples
+# Preview classifications without applying labels
+python -m src.workflows.email_triage --dry-run -n 5
+
+# Verbose logging for each processed email
+python -m src.workflows.email_triage -v -n 3
 ```
 
 First run will open browser for Gmail OAuth authentication.
