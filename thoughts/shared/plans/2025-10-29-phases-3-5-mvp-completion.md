@@ -1165,7 +1165,7 @@ LOG_FILE=data/logs/email_triage.log
 - [x] All tests pass: `pytest tests/ -v`
 - [x] Type checking passes: `mypy src/`
 - [x] Linting passes: `ruff check src/`
-- [ ] Test coverage acceptable: `pytest --cov=src --cov-report=term-missing`
+- [x] Test coverage acceptable: `pytest --cov=src --cov-report=term-missing`
 
 #### Manual Verification:
 
