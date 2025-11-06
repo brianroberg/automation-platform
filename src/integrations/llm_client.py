@@ -1,8 +1,7 @@
 """LLM client for email classification using OpenAI-compatible APIs.
 
 Supports multiple providers:
-- Together.ai (recommended for development)
-- MLX server (recommended for production on macOS)
+- MLX server (recommended for both development and production)
 - OpenAI (alternative)
 - Any OpenAI-compatible API
 """
@@ -20,9 +19,7 @@ logger = logging.getLogger(__name__)
 class LLMClient:
     """Client for interacting with LLM providers via OpenAI-compatible API.
 
-    Supports dual-environment setup:
-    - Development: Together.ai or other hosted providers
-    - Production: Local MLX server on macOS
+    Designed primarily for MLX deployments, but works with any OpenAI-compatible API.
     """
 
     def __init__(
@@ -43,14 +40,13 @@ class LLMClient:
 
         Environment Variables:
             LLM_BASE_URL: Base URL for LLM API
-                - Together.ai: https://api.together.xyz/v1
-                - MLX server: http://localhost:8080/v1
+                - MLX server (local): http://localhost:8080/v1
+                - MLX server (over Tailscale): http://<tailscale-host>:8080/v1
                 - OpenAI: https://api.openai.com/v1
             LLM_MODEL: Model identifier
-                - Together.ai: meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
                 - MLX: mlx-community/Llama-3.2-3B-Instruct-4bit
                 - OpenAI: gpt-4o-mini
-            LLM_API_KEY: API key (not needed for local MLX server)
+            LLM_API_KEY: API key (not needed for MLX server)
         """
         self.model = model or os.getenv("LLM_MODEL") or Config.LLM_MODEL
         self.base_url = base_url or os.getenv("LLM_BASE_URL")
@@ -59,7 +55,6 @@ class LLMClient:
         self.api_key = (
             api_key
             or os.getenv("LLM_API_KEY")
-            or os.getenv("TOGETHER_API_KEY")
             or os.getenv("OPENAI_API_KEY")
             or "not-needed"
         )
@@ -68,18 +63,18 @@ class LLMClient:
             raise ValueError(
                 "LLM_BASE_URL environment variable must be set.\n"
                 "Examples:\n"
-                "  Development (Together.ai): export LLM_BASE_URL=https://api.together.xyz/v1\n"
-                "  Production (MLX): export LLM_BASE_URL=http://localhost:8080/v1"
+                "  MLX (local): export LLM_BASE_URL=http://localhost:8080/v1\n"
+                "  MLX (over Tailscale): export LLM_BASE_URL=http://<tailscale-host>:8080/v1"
             )
 
         # Determine provider from base_url for logging
         provider = "Unknown"
-        if "together" in self.base_url.lower():
-            provider = "Together.ai"
-        elif "openai" in self.base_url.lower():
+        if "openai" in self.base_url.lower():
             provider = "OpenAI"
         elif "localhost" in self.base_url or "127.0.0.1" in self.base_url:
             provider = "MLX (local)"
+        elif ".alpha" in self.base_url or ".ts.net" in self.base_url:
+            provider = "MLX (Tailscale)"
 
         logger.info(f"Initialized LLM client: provider={provider}, model={self.model}")
 

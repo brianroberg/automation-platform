@@ -35,9 +35,9 @@ The **Automation Platform** is a Mac-local email classification system that uses
 - 🔜 **Phase 4 Pending**: Email triage workflow orchestration (not started)
 - 🔜 **Phase 5 Pending**: End-to-end testing and documentation (not started)
 
-**Key Technical Decision**: Dual-environment strategy
-- **Development**: Together.ai hosted API (recommended, currently configured)
-- **Production**: MLX server on macOS laptop (free, private, fast)
+**Key Technical Decision**: MLX-first strategy
+- **Development**: MLX server on Apple Silicon (accessed remotely via secure network)
+- **Production**: Same MLX server on macOS laptop (free, private, fast)
 - **Interface**: Unified OpenAI-compatible client (provider-agnostic)
 
 ## Project Overview
@@ -59,7 +59,7 @@ Build a modular Python automation framework running locally on Mac with containe
 The MVP successfully:
 1. Connects to Gmail API with restricted OAuth scopes (`gmail.readonly` + `gmail.labels`)
 2. Fetches unread emails from inbox
-3. Classifies emails using LLM (via provider-agnostic client supporting MLX, Together.ai, OpenAI)
+3. Classifies emails using LLM (via provider-agnostic client, with MLX as the default deployment)
 4. Applies appropriate Gmail labels based on classification
 5. Handles errors gracefully with comprehensive logging
 6. Logs activity for debugging and monitoring
@@ -90,7 +90,7 @@ The MVP successfully:
 #### 2. LLM Client (`src/integrations/llm_client.py:1-221`)
 - **Status**: Production-ready
 - **Features**:
-  - Multi-provider support (Together.ai, MLX, OpenAI, any OpenAI-compatible API)
+  - Supports MLX (primary) and other OpenAI-compatible APIs
   - Server verification on initialization
   - Email classification with structured prompts
   - Label validation with fallback to default
@@ -261,7 +261,7 @@ The MVP successfully:
 **Tasks**:
 1. **End-to-End Testing**
    - Full workflow integration test
-   - Multiple LLM provider testing (Together.ai, MLX, OpenAI)
+   - Validate MLX connectivity from development and production environments
    - Error scenario testing
    - Performance testing
 
@@ -293,28 +293,27 @@ The MVP successfully:
 - **Isolation**: Docker containers (deferred to post-MVP)
 - **Scheduling**: macOS launchd or cron (deferred to post-MVP)
 - **Data**: Scoped directory access (~/automation-platform/)
-- **AI**: Dual-environment LLM strategy (see below)
+- **AI**: MLX-first inference accessible via secure network (see below)
 
 ### LLM Integration Strategy
 
-**Dual-Environment Approach** (implemented):
+**MLX-First Approach**:
 
-#### Development Environment (Recommended)
-- **Provider**: Together.ai hosted API
+#### Development Environment
+- **Access Method**: Remote connection to MLX server (e.g. via Tailscale)
 - **Configuration**:
   ```bash
-  LLM_BASE_URL=https://api.together.xyz/v1
-  LLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
-  LLM_API_KEY=your-together-api-key
+  LLM_BASE_URL=http://<tailscale-host>:8080/v1
+  LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+  LLM_API_KEY=not-needed
   ```
 - **Benefits**:
-  - Works in Codespaces/Linux environments
-  - No local server management
-  - Fast setup (5 minutes)
-  - Low cost (~$0.0001/email, ~$4/year for 100 emails/day)
-  - Reliable and fast (~100-300ms latency)
+  - Same infrastructure as production
+  - No third-party data sharing
+  - Consistent behavior across environments
+  - Debuggable from remote environments with network visibility
 
-#### Production Environment (Recommended)
+#### Production Environment
 - **Provider**: MLX server on macOS laptop
 - **Configuration**:
   ```bash
@@ -411,25 +410,21 @@ automation-platform/
 - `.gitignore` configured to exclude all secrets
 
 **Data Privacy**:
-- **Development (Together.ai)**: Email content sent to third-party API (SOC 2 certified, not used for training)
-- **Production (MLX)**: All data stays on local laptop (complete privacy)
+- Development and production share the same MLX server, so email content remains on hardware you control.
 
 ## Dependencies and Blockers
 
 ### Current Blocker (Phase 2)
 
-**MLX Server Setup Decision** (documented in `thoughts/shared/handoffs/general/2025-10-09_02-04-50_phase2-llm-integration.md:19-40`):
+**MLX Server Accessibility** (documented in `thoughts/shared/handoffs/general/2025-10-09_02-04-50_phase2-llm-integration.md:19-40`):
 
-- **Issue**: MLX only works on macOS with Apple Silicon
-- **Impact**: Cannot test MLX in Codespaces (Linux) or CI/CD
-- **Solution Implemented**: Dual-environment strategy
-  - Development uses Together.ai (currently configured)
-  - Production uses MLX (tested when available)
-  - LLMClient supports both seamlessly
+- **Issue**: MLX runs only on macOS with Apple Silicon
+- **Impact**: Development environments (Codespaces/Linux) must reach MLX remotely
+- **Solution Implemented**: Provide network access (e.g. Tailscale) from development to the MLX host
 
 **Action Required**:
-1. Set up Together.ai API key for development (recommended)
-2. Optionally: Set up MLX server on macOS laptop for production testing
+1. Ensure Tailscale (or equivalent) is configured between development environment and Mac
+2. Keep `mlx_lm.server` running on the Mac for both development and production testing
 
 ### Dependencies for Phase 3
 
@@ -459,7 +454,7 @@ automation-platform/
 **Internal Requirements**:
 - Phase 4 complete (workflow implemented)
 - Real Gmail account for end-to-end testing
-- LLM provider configured (Together.ai or MLX)
+- LLM provider configured (MLX base URL reachable)
 
 **Optional for Production**:
 - MLX server running on macOS laptop
@@ -512,12 +507,11 @@ automation-platform/
 
 ### Immediate Next Steps
 
-1. **Resolve LLM Provider** (if not done):
-   - Sign up for Together.ai account (recommended for development)
-   - Get API key from dashboard
-   - Add `LLM_API_KEY` to `.env` file
-   - Test LLM client with sample email
-   - Alternative: Set up MLX server on macOS laptop
+1. **Ensure MLX Access**:
+   - Configure secure network access (e.g. Tailscale) between development environment and Mac
+   - Start `mlx_lm.server` on the Apple Silicon laptop
+   - Set `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` (if required) in `.env`
+   - Test the LLM client with a sample email classification
 
 2. **Begin Phase 3** (Gmail Integration):
    - Set up Gmail API project in Google Cloud Console
@@ -631,9 +625,9 @@ automation-platform/
 ## Open Questions
 
 1. **LLM Provider Selection**:
-   - Has Together.ai API key been obtained?
-   - Is MLX server set up on macOS laptop?
-   - Which provider should be used for initial testing?
+   - Is secure connectivity to the MLX server configured for all development environments?
+   - Is `mlx_lm.server` running on the Apple Silicon laptop?
+   - Are fallback providers needed for contingency testing?
 
 2. **Gmail API Setup**:
    - Has Google Cloud Console project been created?

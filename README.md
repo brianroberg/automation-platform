@@ -34,7 +34,20 @@ pip install -r requirements-dev.txt
 llm install llm-mlx
 ```
 
-### 3. Configure Gmail API
+### 3. Start MLX LLM Server
+
+Run an MLX server on your macOS laptop (or another Apple Silicon host) and expose it to this environment (for example with [Tailscale](https://tailscale.com/)):
+
+```bash
+mlx_lm.server \
+  --model mlx-community/Llama-3.2-3B-Instruct-4bit \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+Ensure the development environment can reach the server via the chosen network tunnel.
+
+### 4. Configure Gmail API
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a new project
@@ -43,14 +56,14 @@ llm install llm-mlx
 5. Download credentials JSON
 6. Save as `config/gmail_credentials.json`
 
-### 4. Configure Environment
+### 5. Configure Environment
 
 ```bash
 cp .env.example .env
-# Edit .env if you need to change defaults
+# Edit .env to point LLM_BASE_URL at your MLX server (e.g. http://<tailscale-host>:8080/v1)
 ```
 
-### 5. Configure Labels
+### 6. Configure Labels
 
 Edit `config/labels.json` to customize email classification categories and their definitions.
 

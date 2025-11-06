@@ -165,6 +165,6 @@ Gmail API has quotas:
 ## Next Steps
 
 After completing Gmail setup:
-1. ✅ Configure Together.ai API key in `.env`
+1. ✅ Configure MLX connection in `.env`
 2. ✅ Test Phase 3 success criteria
 3. ✅ Proceed to Phase 4 (Email Triage Workflow)

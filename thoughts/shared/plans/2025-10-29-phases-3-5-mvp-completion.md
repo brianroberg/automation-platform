@@ -17,7 +17,7 @@ Complete the Email Classification MVP by implementing Gmail integration, email t
 
 **Phase 2: LLM Integration**
 - LLM client (`src/integrations/llm_client.py`) fully implemented
-- Support for multiple providers (Together.ai, MLX, OpenAI) via OpenAI-compatible API
+- Support for MLX (primary) and other OpenAI-compatible APIs via a unified client
 - Email classification with structured prompts
 - Label validation with fallback to default
 - 7 comprehensive unit tests passing
@@ -56,12 +56,12 @@ A working command-line MVP that:
 
 1. ✅ Authenticates with Gmail API using OAuth (restricted scopes: `gmail.readonly` + `gmail.labels`)
 2. ✅ Fetches unread emails from inbox
-3. ✅ Classifies emails using Together.ai LLM (development) or MLX (production)
+3. ✅ Classifies emails using an MLX-hosted LLM reachable from both development and production environments
 4. ✅ Applies appropriate Gmail labels based on classification
 5. ✅ Handles errors gracefully with comprehensive logging
 6. ✅ Supports customizable label configurations
 
-**Verification**: Running `python -m src.workflows.email_triage` successfully classifies and labels unread emails using Together.ai.
+**Verification**: Running `python -m src.workflows.email_triage` successfully classifies and labels unread emails using the MLX server.
 
 ## What We're NOT Doing
 
@@ -693,7 +693,7 @@ Gmail API has quotas:
 ## Next Steps
 
 After completing Gmail setup:
-1. ✅ Configure Together.ai API key in `.env`
+1. ✅ Configure MLX server connection in `.env`
 2. ✅ Test Phase 3 success criteria
 3. ✅ Proceed to Phase 4 (Email Triage Workflow)
 ```
@@ -1135,16 +1135,16 @@ def test_workflow_continues_on_single_email_failure(
 #### 4. Environment Configuration Setup
 
 **File**: `.env`
-**Changes**: Create actual environment file with Together.ai configuration
+**Changes**: Create actual environment file with MLX configuration
 
 ```bash
-# Copy from .env.example and configure with your API key
+# Copy from .env.example and configure with your MLX server details
 cp .env.example .env
 
 # Then edit .env and set:
-LLM_BASE_URL=https://api.together.xyz/v1
-LLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
-LLM_API_KEY=<your-together-api-key-here>
+LLM_BASE_URL=http://<tailscale-host>:8080/v1
+LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+LLM_API_KEY=not-needed
 
 # Gmail configuration (will be created during Phase 3)
 GMAIL_CREDENTIALS_FILE=config/gmail_credentials.json
@@ -1170,7 +1170,7 @@ LOG_FILE=data/logs/email_triage.log
 #### Manual Verification:
 
 **Environment Setup:**
-- [ ] `.env` file created with Together.ai API key
+- [ ] `.env` file created with MLX server connection details
 - [ ] `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` configured
 - [ ] Gmail credentials from Phase 3 still valid
 
@@ -1342,17 +1342,16 @@ Add these sections to the existing README:
 ```markdown
 ## Quick Start
 
-### 1. Configure Together.ai
+### 1. Point the app at your MLX server
 
 ```bash
 # Create .env file
 cp .env.example .env
 
-# Edit .env and add your Together.ai API key
-# Get key from: https://api.together.xyz/settings/api-keys
-LLM_BASE_URL=https://api.together.xyz/v1
-LLM_MODEL=meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo
-LLM_API_KEY=your-together-api-key-here
+# Edit .env and set the MLX host (for example, http://<tailscale-host>:8080/v1)
+LLM_BASE_URL=http://localhost:8080/v1
+LLM_MODEL=mlx-community/Llama-3.2-3B-Instruct-4bit
+LLM_API_KEY=not-needed
 ```
 
 ### 2. Set up Gmail API
@@ -1373,7 +1372,7 @@ source venv/bin/activate
 python -m src.workflows.email_triage
 ```
 
-First run will open browser for Gmail OAuth authentication.
+First run will open a browser for Gmail OAuth authentication.
 
 ## Customizing Labels
 
@@ -1425,8 +1424,8 @@ Edit `config/labels.json` to define your own classification categories:
 ### LLM Classification Issues
 
 **Problem**: "Cannot connect to LLM API"
-- **Solution**: Check Together.ai API key is correct in `.env`
-- **Test**: `curl https://api.together.xyz/v1/models -H "Authorization: Bearer your-key"`
+- **Solution**: Ensure the MLX server is reachable and `.env` points at the correct host
+- **Test**: `curl http://<tailscale-host>:8080/v1/models`
 
 **Problem**: "Invalid label returned by LLM"
 - **Solution**: LLM returned a label not in your config
@@ -1581,7 +1580,7 @@ markers =
   1. Clone repo
   2. Create venv
   3. Install dependencies
-  4. Configure Together.ai
+  4. Configure MLX connection
   5. Set up Gmail OAuth
   6. Customize labels
   7. Run workflow successfully
@@ -1631,7 +1630,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with Together.ai key
+# Edit .env with MLX base URL (e.g. http://<tailscale-host>:8080/v1)
 
 # Set up Gmail OAuth
 # Follow docs/gmail_setup.md
@@ -1651,7 +1650,7 @@ python -m src.workflows.email_triage
 #### 3. Error Handling Test
 - **Invalid Credentials**: Delete `config/gmail_credentials.json` and verify error message
 - **Network Failure**: Disconnect internet and verify error handling
-- **Invalid API Key**: Use wrong Together.ai key and verify error message
+- **MLX Unavailable**: Stop `mlx_lm.server` and verify error message
 - **Empty Inbox**: Mark all emails as read and verify workflow handles gracefully
 
 #### 4. Long-term Reliability Test
@@ -1691,9 +1690,9 @@ Complete these steps in order:
 - [ ] Create Python 3.12+ virtual environment
 - [ ] Install dependencies (`pip install -r requirements.txt`)
 - [ ] Create `.env` file from `.env.example`
-- [ ] Sign up for Together.ai account
-- [ ] Get Together.ai API key
-- [ ] Add API key to `.env`
+- [ ] Provision access to MLX host (e.g. join Tailscale tailnet)
+- [ ] Start `mlx_lm.server` on Apple Silicon laptop
+- [ ] Point `.env` at the MLX server (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`)
 - [ ] Create Google Cloud project
 - [ ] Enable Gmail API
 - [ ] Configure OAuth consent screen
@@ -1716,8 +1715,7 @@ Complete these steps in order:
 
 ## External Resources
 
-- **Together.ai Docs**: https://docs.together.ai/
-- **Together.ai Pricing**: https://www.together.ai/pricing
+- **Tailscale**: https://tailscale.com/
 - **Gmail API Docs**: https://developers.google.com/gmail/api/guides
 - **Google Cloud Console**: https://console.cloud.google.com/
 - **Python 3.12 Docs**: https://docs.python.org/3.12/
@@ -1746,6 +1744,6 @@ This implementation plan provides a complete roadmap to finish the Email Classif
 
 **Total Estimated Effort**: 4-7 days
 
-**Key Success Metric**: Can run `python -m src.workflows.email_triage` and successfully classify and label real Gmail emails using Together.ai LLM.
+**Key Success Metric**: Can run `python -m src.workflows.email_triage` and successfully classify and label real Gmail emails using the MLX-hosted LLM.
 
 **Next Step**: Begin Phase 3 by setting up Gmail API credentials in Google Cloud Console, then implement `GmailClient` class.
