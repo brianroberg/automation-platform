@@ -1,5 +1,6 @@
 # Core dependencies
 python-dotenv==1.1.1
+PyYAML==6.0.2
 
 # Gmail API
 google-auth==2.41.1

@@ -1,6 +1,7 @@
 """Gmail API client with OAuth authentication."""
 import base64
 import logging
+from email.utils import getaddresses
 from typing import Any, Optional
 
 from google.auth.transport.requests import Request  # type: ignore[import-untyped]
@@ -23,6 +24,10 @@ class GmailClient:
         """Initialize Gmail client with OAuth authentication."""
         self.creds: Optional[Credentials] = None
         self.service: Any = None  # googleapiclient.discovery.Resource type is not easily importable
+        self._primary_email: str = ""
+        self._user_addresses: set[str] = set()
+        self._label_id_to_name: dict[str, str] = {}
+        self._label_name_to_id: dict[str, str] = {}
         self._authenticate()
 
     def _authenticate(self) -> None:
@@ -82,6 +87,28 @@ class GmailClient:
         logger.info("Building Gmail API service")
         self.service = build("gmail", "v1", credentials=self.creds)
         logger.info("Successfully authenticated with Gmail API")
+        self._load_profile()
+        self._refresh_label_cache()
+
+    def _load_profile(self) -> None:
+        """Load the authenticated user's profile information."""
+        profile = self.service.users().getProfile(userId="me").execute()
+        self._primary_email = profile.get("emailAddress", "").lower()
+        self._user_addresses = Config.get_triage_addresses(self._primary_email)
+        logger.debug("Loaded Gmail profile for %s", self._primary_email or "unknown user")
+
+    def _refresh_label_cache(self) -> None:
+        """Populate the label cache for translating IDs <-> names."""
+        response = self.service.users().labels().list(userId="me").execute()
+        labels = response.get("labels", [])
+        self._label_id_to_name = {label["id"]: label["name"] for label in labels}
+        self._label_name_to_id = {label["name"]: label["id"] for label in labels}
+        logger.debug("Cached %s Gmail labels", len(self._label_id_to_name))
+    def label_exists(self, label_name: str) -> bool:
+        """Return True if Gmail already has the given label name."""
+        if not self._label_name_to_id:
+            self._refresh_label_cache()
+        return label_name in self._label_name_to_id
 
     def get_unread_emails(self, max_results: int = 10) -> list[dict[str, Any]]:
         """Fetch unread emails from inbox.
@@ -153,19 +180,32 @@ class GmailClient:
             for header in msg["payload"]["headers"]
         }
 
-        sender = headers.get("From", "Unknown")
+        sender_display = headers.get("From", "Unknown")
+        sender = self._extract_address(sender_display)
         subject = headers.get("Subject", "(No Subject)")
+
+        to_recipients = self._extract_addresses(headers.get("To", ""))
+        cc_recipients = self._extract_addresses(headers.get("Cc", ""))
+        bcc_recipients = self._extract_addresses(headers.get("Bcc", ""))
 
         # Extract body
         content = self._extract_body(msg["payload"])
         snippet = msg.get("snippet", "")
+        label_ids = msg.get("labelIds", [])
+        label_names = self._label_names_from_ids(label_ids)
 
         return {
             "id": msg_id,
             "sender": sender,
+            "sender_display": sender_display,
             "subject": subject,
             "content": content,
-            "snippet": snippet
+            "snippet": snippet,
+            "to": to_recipients,
+            "cc": cc_recipients,
+            "bcc": bcc_recipients,
+            "label_ids": label_ids,
+            "existing_labels": label_names,
         }
 
     def _extract_body(self, payload: dict[str, Any]) -> str:
@@ -239,15 +279,11 @@ class GmailClient:
             Label ID
         """
         try:
-            # List existing labels
-            results = self.service.users().labels().list(userId="me").execute()
-            labels = results.get("labels", [])
+            if not self._label_name_to_id:
+                self._refresh_label_cache()
 
-            # Check if label exists
-            for label in labels:
-                if label["name"] == label_name:
-                    logger.debug(f"Found existing label '{label_name}' with ID {label['id']}")
-                    return str(label["id"])
+            if label_name in self._label_name_to_id:
+                return self._label_name_to_id[label_name]
 
             # Create new label
             logger.info(f"Creating new label '{label_name}'")
@@ -261,7 +297,10 @@ class GmailClient:
             ).execute()
 
             logger.info(f"Created label '{label_name}' with ID {label['id']}")
-            return str(label["id"])
+            label_id = str(label["id"])
+            self._label_name_to_id[label_name] = label_id
+            self._label_id_to_name[label_id] = label_name
+            return label_id
 
         except HttpError as e:
             logger.error(f"Gmail API error managing labels: {e}")
@@ -269,3 +308,43 @@ class GmailClient:
         except Exception as e:
             logger.error(f"Failed to get or create label '{label_name}': {e}")
             raise
+
+    def _extract_address(self, value: str | None) -> str:
+        """Parse the first email address from a header value."""
+        if not value:
+            return ""
+        addresses = getaddresses([value])
+        if not addresses:
+            return value.strip().lower()
+        return addresses[0][1].strip().lower()
+
+    def _extract_addresses(self, value: str | None) -> list[str]:
+        """Parse all email addresses from a header."""
+        if not value:
+            return []
+        return [
+            addr.strip().lower()
+            for _, addr in getaddresses([value])
+            if addr.strip()
+        ]
+
+    def _label_names_from_ids(self, label_ids: list[str]) -> list[str]:
+        """Translate Gmail label IDs to human-readable names."""
+        if not label_ids:
+            return []
+        if not self._label_id_to_name:
+            self._refresh_label_cache()
+        names: list[str] = []
+        for label_id in label_ids:
+            name = self._label_id_to_name.get(label_id)
+            if name:
+                names.append(name)
+        return names
+
+    def get_primary_address(self) -> str:
+        """Return the authenticated user's primary email address."""
+        return self._primary_email
+
+    def get_user_addresses(self) -> set[str]:
+        """Return the set of addresses that should be treated as 'me'."""
+        return set(self._user_addresses)

@@ -1,0 +1,67 @@
+rules:
+  - name: vip-sender
+    description: "Immediately label messages from VIP senders."
+    when:
+      any:
+        - sender:
+            in:
+              - vip1@example.com
+              - vip2@example.com
+        - sender:
+            domains:
+              - vip-partners.example
+    actions:
+      add:
+        - VIP
+      exclude: []
+    terminate: false
+
+  - name: solo-vip-priority
+    description: "Upgrade VIP messages where you are the only direct recipient."
+    # Ensure the 'priority' label exists in config/labels.json before enabling.
+    when:
+      all:
+        - decided_labels:
+            has_any:
+              - VIP
+        - recipients:
+            only_me: true
+      # Example of referencing prior decisions plus recipient metadata.
+    actions:
+      add:
+        - priority
+      exclude:
+        - fyi
+    terminate: false
+
+  - name: bulk-newsletter
+    description: "Treat high-recipient-count newsletters as FYI and skip response-required."
+    when:
+      all:
+        - recipients:
+            total_more_than: 5
+            contains_mailing_list: true
+            any_external: true
+        - subject:
+            contains_any:
+              - newsletter
+              - digest
+    actions:
+      add:
+        - fyi
+      exclude:
+        - response-required
+    terminate: false
+
+  - name: auto-acknowledge
+    description: "Stop processing certain automated receipts."
+    when:
+      subject:
+        contains_any:
+          - "auto-confirmation"
+          - "receipt"
+    actions:
+      add:
+        - transactional
+      exclude: []
+    terminate: true

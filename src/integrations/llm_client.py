@@ -5,6 +5,7 @@ Supports multiple providers:
 - OpenAI (alternative)
 - Any OpenAI-compatible API
 """
+from __future__ import annotations
 import logging
 import os
 from typing import Any
@@ -86,6 +87,7 @@ class LLMClient:
 
         # Verify server is reachable
         self._verify_server_available()
+        self._last_response: str | None = None
 
     def _verify_server_available(self) -> None:
         """Verify the LLM API is reachable.
@@ -143,6 +145,7 @@ class LLMClient:
         prompt = self._build_classification_prompt(sender, subject, content, label_config)
 
         try:
+            self._last_response = None
             # Call LLM via OpenAI API
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -154,7 +157,10 @@ class LLMClient:
                 temperature=0.0  # Deterministic classification
             )
 
-            classification = (response.choices[0].message.content or "").strip().lower()
+            raw_message = response.choices[0].message.content or ""
+            cleaned_message = raw_message.strip()
+            self._last_response = cleaned_message
+            classification = cleaned_message.lower()
             logger.debug(f"Raw LLM output: {classification}")
 
             # Validate classification is one of the configured labels
@@ -173,6 +179,10 @@ class LLMClient:
         except Exception as e:
             logger.error(f"LLM classification failed: {e}")
             raise RuntimeError(f"LLM classification failed: {e}")
+
+    def get_last_response(self) -> str | None:
+        """Return the last raw LLM response content."""
+        return self._last_response
 
     def _build_classification_prompt(
         self,

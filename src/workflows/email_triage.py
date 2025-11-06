@@ -4,12 +4,17 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 from src.core.config import Config
 from src.integrations.gmail_client import GmailClient
 from src.integrations.llm_client import LLMClient
 from src.utils.logging import setup_logging
+from src.workflows.deterministic_rules import (
+    DeterministicRuleEngine,
+    LabelDecisions,
+    RuleContext,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,32 +28,49 @@ class EmailTriageWorkflow:
 
         try:
             self.label_config = Config.load_label_config()
-            logger.debug("Loaded %s label definitions", len(self.label_config["labels"]))
+            self.valid_labels = {label["name"] for label in self.label_config["labels"]}
+            logger.debug("Loaded %s label definitions", len(self.valid_labels))
 
             self.gmail_client = GmailClient()
             self.llm_client = LLMClient()
+            rules_data = Config.load_deterministic_rules()
+            self.rules_engine = DeterministicRuleEngine(rules_data, self.valid_labels)
+            self.primary_email = self.gmail_client.get_primary_address()
+            self.user_addresses = self.gmail_client.get_user_addresses()
+            if not self.user_addresses and self.primary_email:
+                self.user_addresses = {self.primary_email.lower()}
 
             logger.info("Email Triage Workflow initialized successfully")
         except Exception as exc:
             logger.error("Failed to initialize workflow: %s", exc)
             raise
 
-    def run(self, max_emails: int = 10, dry_run: bool = False, verbose: bool = False) -> dict[str, Any]:
+    def run(
+        self,
+        max_emails: int = 10,
+        dry_run: bool = False,
+        verbose: bool = False,
+        verbosity: int = 0,
+    ) -> dict[str, Any]:
         """Run the workflow, returning summary statistics.
 
         Args:
             max_emails: Maximum number of unread emails to process.
             dry_run: When True, skip applying labels (classification only).
             verbose: When True, print per-email results to stdout.
+            verbosity: Verbosity level for logging additional details.
 
         Returns:
             Summary statistics for the run.
         """
+        effective_verbosity = max(int(bool(verbose)), verbosity or 0)
+        is_verbose = effective_verbosity >= 1
+
         logger.info(
-            "Starting email triage (max_emails=%s, dry_run=%s, verbose=%s)",
+            "Starting email triage (max_emails=%s, dry_run=%s, verbosity=%s)",
             max_emails,
             dry_run,
-            verbose,
+            effective_verbosity,
         )
 
         stats: dict[str, Any] = {
@@ -74,11 +96,16 @@ class EmailTriageWorkflow:
                 stats["processed"] += 1
 
                 try:
-                    success = self._process_email(email, dry_run=dry_run)
+                    final_labels = self._process_email(
+                        email,
+                        dry_run=dry_run,
+                        verbosity=effective_verbosity,
+                    )
+                    success = True
                 except Exception as exc:  # Broad catch ensures one bad email does not stop run
                     logger.error("Failed to process email %s: %s", email.get("id"), exc)
                     stats["failed"] += 1
-                    if verbose:
+                    if is_verbose:
                         print(
                             f"[ERROR] Email {email.get('id', 'unknown')} failed: {exc}"
                         )
@@ -86,24 +113,23 @@ class EmailTriageWorkflow:
 
                 if success:
                     stats["succeeded"] += 1
-                    classification = email.get("classification")
-                    if classification:
-                        stats["classifications"][classification] = (
-                            stats["classifications"].get(classification, 0) + 1
-                        )
+                    if final_labels:
+                        self._update_stats(stats, final_labels)
                         if dry_run:
-                            print(
-                                f"[DRY RUN] Email '{email.get('subject', '')}' "
-                                f"(id={email.get('id')}) would be labeled '{classification}'"
-                            )
-                        elif verbose:
-                            print(
-                                f"[APPLIED] Email '{email.get('subject', '')}' "
-                                f"(id={email.get('id')}) labeled '{classification}'"
-                            )
+                            for label in sorted(final_labels):
+                                print(
+                                    f"[DRY RUN] Email '{email.get('subject', '')}' "
+                                    f"(id={email.get('id')}) would be labeled '{label}'"
+                                )
+                        elif is_verbose:
+                            for label in sorted(final_labels):
+                                print(
+                                    f"[APPLIED] Email '{email.get('subject', '')}' "
+                                    f"(id={email.get('id')}) labeled '{label}'"
+                                )
                 else:
                     stats["failed"] += 1
-                    if verbose:
+                    if is_verbose:
                         print(
                             f"[ERROR] Email {email.get('id', 'unknown')} failed to process."
                         )
@@ -124,31 +150,119 @@ class EmailTriageWorkflow:
             logger.error("Email triage workflow failed: %s", exc)
             raise
 
-    def _process_email(self, email: dict[str, Any], dry_run: bool = False) -> bool:
+    def _process_email(
+        self,
+        email: dict[str, Any],
+        dry_run: bool = False,
+        verbosity: int = 0,
+    ) -> set[str]:
         """Classify and optionally label a single email."""
         email_id = email["id"]
-        sender = email["sender"]
-        subject = email["subject"]
+        sender = email.get("sender", "")
+        subject = email.get("subject", "")
 
         logger.debug("Processing email %s: %s", email_id, subject[:50])
 
-        classification = self.llm_client.classify_email(
+        decisions = LabelDecisions(
+            valid_labels=self.valid_labels,
+            label_validator=self.gmail_client.label_exists,
+        )
+        existing_labels = set(email.get("existing_labels", []))
+        context = RuleContext(
             sender=sender,
+            sender_display=email.get("sender_display", sender),
             subject=subject,
-            content=email["content"],
-            label_config=self.label_config,
+            content=email.get("content", ""),
+            snippet=email.get("snippet", ""),
+            to=email.get("to", []),
+            cc=email.get("cc", []),
+            bcc=email.get("bcc", []),
+            existing_labels=existing_labels,
+            decisions=decisions,
+            my_addresses=self.user_addresses,
+            primary_email=self.primary_email or "",
         )
 
-        email["classification"] = classification
-        logger.info("Email %s classified as: %s", email_id, classification)
+        terminated = self.rules_engine.run(context)
 
+        llm_response: str | None = None
+        if not terminated:
+            classification = self.llm_client.classify_email(
+                sender=sender,
+                subject=subject,
+                content=email.get("content", ""),
+                label_config=self.label_config,
+            )
+
+            logger.info("Email %s classified as: %s", email_id, classification)
+
+            get_last_response = getattr(self.llm_client, "get_last_response", None)
+            if callable(get_last_response):
+                try:
+                    llm_response = get_last_response()
+                except Exception as exc:
+                    logger.debug("Unable to retrieve last LLM response: %s", exc)
+
+            if llm_response is not None:
+                email["llm_response"] = llm_response
+
+            if verbosity >= 2 and llm_response:
+                print(
+                    f"[LLM RESPONSE] Email '{subject}' (id={email_id}) -> {llm_response}"
+                )
+
+            if decisions.is_excluded(classification):
+                logger.info(
+                    "LLM suggested '%s' for email %s but it was excluded by deterministic rules",
+                    classification,
+                    email_id,
+                )
+            else:
+                decisions.add_label(classification, source="llm")
+
+        final_labels = decisions.final_labels()
+        email["applied_labels"] = sorted(final_labels)
+
+        if verbosity >= 2 and final_labels:
+            print(
+                f"[RULE] Email '{subject}' (id={email_id}) deterministic labels -> {sorted(final_labels)}"
+            )
+
+        self._apply_labels(
+            email_id=email_id,
+            labels=final_labels,
+            existing_labels=existing_labels,
+            dry_run=dry_run,
+        )
+
+        return final_labels
+
+    def _apply_labels(
+        self,
+        email_id: str,
+        labels: Iterable[str],
+        existing_labels: set[str],
+        dry_run: bool,
+    ) -> None:
+        """Apply decided labels via Gmail unless running in dry-run mode."""
         if dry_run:
-            logger.debug("Dry run: would apply label '%s' to email %s", classification, email_id)
-            return True
+            return
 
-        self.gmail_client.apply_label(email_id, classification)
-        logger.debug("Applied label '%s' to email %s", classification, email_id)
-        return True
+        for label in labels:
+            if label in existing_labels:
+                logger.debug(
+                    "Skipping label '%s' for email %s; already applied",
+                    label,
+                    email_id,
+                )
+                continue
+            self.gmail_client.apply_label(email_id, label)
+            logger.debug("Applied label '%s' to email %s", label, email_id)
+
+    def _update_stats(self, stats: dict[str, Any], labels: Iterable[str]) -> None:
+        """Increment classification stats for each applied label."""
+        for label in labels:
+            stats["classifications"][label] = stats["classifications"].get(label, 0) + 1
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -171,8 +285,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "-v",
         "--verbose",
-        action="store_true",
-        help="Print the result of processing each email.",
+        action="count",
+        default=0,
+        help="Increase output detail (-v for per-email status, -vv to include raw LLM responses).",
     )
     return parser.parse_args(argv)
 
@@ -188,10 +303,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         workflow = EmailTriageWorkflow()
+        verbosity = args.verbose or 0
+        if args.dry_run:
+            verbosity = max(verbosity, 1)
+
         workflow.run(
             max_emails=args.num_messages,
             dry_run=args.dry_run,
-            verbose=args.verbose or args.dry_run,
+            verbose=verbosity >= 1,
+            verbosity=verbosity,
         )
         logger.info("Email triage completed successfully")
         return 0

@@ -1,6 +1,10 @@
 {
   "labels": [
     {
+      "name": "VIP",
+      "description": "Important senders who should always be surfaced immediately."
+    },
+    {
       "name": "response-required",
       "description": "Emails that require a direct response or action from the recipient. Includes questions, requests, invitations requiring RSVP, or time-sensitive matters."
     },

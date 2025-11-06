@@ -67,6 +67,10 @@ cp .env.example .env
 
 Edit `config/labels.json` to customize email classification categories and their definitions.
 
+### 7. Configure Deterministic Rules
+
+Copy `config/deterministic_rules.example.yaml` to `config/deterministic_rules.yaml` and edit it to describe the pre-LLM rules you want to run (for example VIP sender rules, recipient-based heuristics, or termination logic). Rules are evaluated in order, can add or exclude labels, and may optionally terminate processing of a message before the LLM runs.
+
 ## Usage
 
 ```bash
