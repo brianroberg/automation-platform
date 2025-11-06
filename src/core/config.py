@@ -23,7 +23,10 @@ class Config:
     LOGS_DIR = DATA_DIR / "logs"
 
     # Gmail API
-    GMAIL_CREDENTIALS_FILE = PROJECT_ROOT / os.getenv("GMAIL_CREDENTIALS_FILE", "config/gmail_credentials.json")
+    GMAIL_CREDENTIALS_FILE = PROJECT_ROOT / os.getenv(
+        "GMAIL_CREDENTIALS_FILE",
+        "config/gmail_credentials.json",
+    )
     GMAIL_TOKEN_FILE = PROJECT_ROOT / os.getenv("GMAIL_TOKEN_FILE", "config/gmail_token.json")
     GMAIL_SCOPES = [
         "https://www.googleapis.com/auth/gmail.readonly",

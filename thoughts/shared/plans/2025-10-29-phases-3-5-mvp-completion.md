@@ -1161,10 +1161,10 @@ LOG_FILE=data/logs/email_triage.log
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Workflow module imports: `python -c "from src.workflows.email_triage import EmailTriageWorkflow"`
-- [ ] All tests pass: `pytest tests/ -v`
-- [ ] Type checking passes: `mypy src/`
-- [ ] Linting passes: `ruff check src/`
+- [x] Workflow module imports: `python -c "from src.workflows.email_triage import EmailTriageWorkflow"`
+- [x] All tests pass: `pytest tests/ -v`
+- [x] Type checking passes: `mypy src/`
+- [x] Linting passes: `ruff check src/`
 - [ ] Test coverage acceptable: `pytest --cov=src --cov-report=term-missing`
 
 #### Manual Verification:
