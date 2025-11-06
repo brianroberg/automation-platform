@@ -85,6 +85,9 @@ First run will open browser for Gmail OAuth authentication.
 # Run tests
 pytest
 
+# Run integration tests (requires MLX server)
+pytest --integration
+
 # Run tests with coverage
 pytest --cov=src
 
