@@ -72,31 +72,24 @@ This approach ensures:
 - **Isolation**: Docker containers for clean environment separation
 - **Scheduling**: macOS launchd or cron for automation triggers
 - **Data**: Scoped directory access via Docker volumes
-- **AI**: Local LLM access via Simon Willison's LLM library with MLX
+- **AI**: Local LLM access via MLX server exposing the OpenAI-compatible API
 
 ### LLM Integration Strategy
-Use [Simon Willison's LLM library](https://llm.datasette.io/en/stable/) as the interface layer for all AI/LLM interactions:
+Use the MLX HTTP server's OpenAI-compatible endpoints as the primary interface for classification calls:
 
-**Primary Provider: MLX** via [llm-mlx](https://github.com/simonw/llm-mlx) plugin
+**Primary Provider: MLX** (OpenAI-compatible API hosted locally)
 - Optimized for Apple Silicon performance
 - Native Mac hardware acceleration
 - Fast inference for email classification
 
-**Fallback Provider: Ollama** via [llm-ollama](https://github.com/taketwo/llm-ollama) plugin
-- Alternative if MLX has compatibility issues
-- Wider model selection
-- Only use if MLX proves insufficient
-
-**Future Providers (Deferred):**
-- OpenAI
-- Anthropic Claude
-- Other commercial APIs
+**Fallback Provider (Deferred):**
+- Other OpenAI-compatible services (e.g., Ollama, OpenAI) if MLX is unavailable
 
 **Benefits:**
-- **Model Flexibility**: Easy switching between local and commercial models
-- **Unified Interface**: Single API for all model providers
-- **Performance**: MLX optimized for Mac hardware
-- **Future-Proof**: Add providers without code changes
+- **Model Flexibility**: Any endpoint speaking the OpenAI API can be configured
+- **Unified Interface**: Standard OpenAI client handles all providers
+- **Performance**: MLX remains primary for Mac-optimized workloads
+- **Future-Proof**: Swap providers by changing configuration only
 
 ### System Architecture
 automation-platform/
@@ -107,7 +100,7 @@ automation-platform/
 │   │   └── config.py              # [MVP] Simple configuration
 │   ├── integrations/
 │   │   ├── gmail_client.py        # [MVP] Gmail API (restricted scopes)
-│   │   ├── llm_client.py          # [MVP] LLM library wrapper (MLX)
+│   │   ├── llm_client.py          # [MVP] OpenAI-compatible API client (MLX)
 │   │   └── base_client.py         # [DEFERRED] Base integration class
 │   ├── workflows/
 │   │   ├── email_triage.py        # [MVP] Primary workflow
@@ -144,11 +137,11 @@ automation-platform/
 - **Performance**: MLX optimized for Apple Silicon
 
 ### LLM Integration
-- **Primary Interface**: Simon Willison's LLM library [MVP]
-- **Primary Provider**: MLX-optimized models via llm-mlx plugin [MVP]
-- **Fallback Provider**: Ollama via llm-ollama plugin [DEFERRED - only if MLX issues]
+- **Primary Interface**: OpenAI-compatible HTTP API client (using MLX endpoint) [MVP]
+- **Primary Provider**: MLX server exposing OpenAI-compatible chat/completions [MVP]
+- **Fallback Provider**: Other OpenAI-compatible APIs (deferred; update config to switch)
 - **Commercial Models**: OpenAI, Anthropic [DEFERRED - add after MVP]
-- **Configuration**: Model selection via environment variables [MVP]
+- **Configuration**: Base URL / model via environment variables [MVP]
 
 ### Gmail API Integration
 **OAuth Scopes (MVP):**
@@ -156,14 +149,10 @@ automation-platform/
 - `https://www.googleapis.com/auth/userinfo.email` - Access to account email address [MVP]
 - `https://www.googleapis.com/auth/gmail.modify` - Read and modify Gmail messages and labels [MVP]
 
-**Explicitly Excluded:**
-- `gmail.send` - Sending email (NOT GRANTED)
-- `gmail.compose` - Creating/sending drafts (NOT GRANTED)
-
 **Security Note**: 
-- Application can read, label, archive, and mark messages as read/unread
-- Cannot send messages or create drafts
-- No direct access to compose/send scopes; only metadata modifications needed for triage
+- Application requests `gmail.modify`, which allows metadata updates and access to compose/send APIs
+- The workflow only reads messages, updates labels, and toggles read/archive state
+- Workflow does not invoke send or draft endpoints even though the scope permits them
 
 ### Development Environment
 - **Primary**: Python venv initially [MVP], Docker Desktop later [DEFERRED]
@@ -178,13 +167,12 @@ automation-platform/
 
 **Day 1-2: Foundation**
 - Set up Python project structure (minimal)
-- Install LLM library and llm-mlx plugin
-- Configure MLX model
+- Configure MLX model and start MLX OpenAI-compatible server
 - Create .env file for configuration
 - Basic logging setup
 
 **Day 3-4: Gmail Integration**
-- Implement Gmail OAuth flow (readonly + labels scopes)
+- Implement Gmail OAuth flow (openid + userinfo.email + gmail.modify scopes)
 - Create simple gmail_client.py to fetch unread emails
 - Test authentication and email retrieval
 
