@@ -33,6 +33,21 @@ rules:
         - fyi
     terminate: false
 
+  - name: school-digests
+    description: "School broadcast emails can be deleted."
+    when:
+      all:
+        - sender:
+            domains:
+              - parentsquare.com
+        - subject:
+            contains_any:
+              - "Digest"
+    actions:
+      add:
+        - to-delete
+    terminate: true
+
   - name: delete-social-media
     description: "Auto-delete social media notifications."
     when:

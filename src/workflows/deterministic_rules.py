@@ -24,6 +24,7 @@ class LabelDecisions:
     valid_labels: set[str] | None = None
     label_validator: Callable[[str], bool] | None = None
     decisions: dict[str, LabelDecision] = field(default_factory=dict)
+    sources: dict[str, str] = field(default_factory=dict)
 
     def add_label(self, label: str, source: str) -> None:
         """Mark a label to be applied."""
@@ -57,6 +58,7 @@ class LabelDecisions:
             logger.debug("Label '%s' set to %s by %s", label, new_state.value, source)
 
         self.decisions[label] = new_state
+        self.sources[label] = source
 
     def _validate_label(self, label: str) -> None:
         if self.valid_labels and label in self.valid_labels:
@@ -79,6 +81,18 @@ class LabelDecisions:
 
     def final_labels(self) -> list[str]:
         return self.pending_additions()
+
+    def label_source(self, label: str) -> str | None:
+        """Return the recorded source for a label decision."""
+        return self.sources.get(label)
+
+    def final_label_sources(self) -> dict[str, str]:
+        """Return the sources for labels that will be applied."""
+        return {
+            label: self.sources.get(label, "")
+            for label, state in self.decisions.items()
+            if state == LabelDecision.ADD
+        }
 
 
 @dataclass

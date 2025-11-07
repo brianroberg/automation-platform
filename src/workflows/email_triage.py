@@ -101,7 +101,7 @@ class EmailTriageWorkflow:
                 stats["processed"] += 1
 
                 try:
-                    final_labels = self._process_email(
+                    final_labels, label_sources = self._process_email(
                         email,
                         dry_run=dry_run,
                         verbosity=effective_verbosity,
@@ -122,14 +122,16 @@ class EmailTriageWorkflow:
                         self._update_stats(stats, final_labels)
                         if dry_run:
                             for label in sorted(final_labels):
+                                origin = self._format_label_origin(label, label_sources)
                                 print(
-                                    f"[DRY RUN] Email '{email.get('subject', '')}' "
+                                    f"[DRY RUN][{origin}] Email '{email.get('subject', '')}' "
                                     f"(id={email.get('id')}) would be labeled '{label}'"
                                 )
                         elif is_verbose:
                             for label in sorted(final_labels):
+                                origin = self._format_label_origin(label, label_sources)
                                 print(
-                                    f"[APPLIED] Email '{email.get('subject', '')}' "
+                                    f"[APPLIED][{origin}] Email '{email.get('subject', '')}' "
                                     f"(id={email.get('id')}) labeled '{label}'"
                                 )
                 else:
@@ -160,8 +162,12 @@ class EmailTriageWorkflow:
         email: dict[str, Any],
         dry_run: bool = False,
         verbosity: int = 0,
-    ) -> set[str]:
-        """Classify and optionally label a single email."""
+    ) -> tuple[set[str], dict[str, str]]:
+        """Classify and optionally label a single email.
+
+        Returns:
+            Tuple of decided labels and their determining sources.
+        """
         email_id = email["id"]
         sender = email.get("sender", "")
         subject = email.get("subject", "")
@@ -240,7 +246,10 @@ class EmailTriageWorkflow:
             dry_run=dry_run,
         )
 
-        return final_labels
+        label_sources = decisions.final_label_sources()
+        email["label_sources"] = label_sources
+
+        return final_labels, label_sources
 
     def _apply_labels(
         self,
@@ -263,6 +272,18 @@ class EmailTriageWorkflow:
                 continue
             self.gmail_client.apply_label(email_id, label)
             logger.debug("Applied label '%s' to email %s", label, email_id)
+
+    @staticmethod
+    def _format_label_origin(label: str, label_sources: dict[str, str]) -> str:
+        """Return a short descriptor for how a label decision was made."""
+        raw_source = label_sources.get(label, "")
+        if raw_source == "llm":
+            return "LLM"
+        if raw_source.startswith("rule:"):
+            return f"RULE {raw_source.split(':', 1)[1]}"
+        if raw_source:
+            return raw_source.upper()
+        return "UNKNOWN"
 
     def _update_stats(self, stats: dict[str, Any], labels: Iterable[str]) -> None:
         """Increment classification stats for each applied label."""
