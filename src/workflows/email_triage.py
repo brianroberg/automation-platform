@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmailTriageWorkflow:
-    """Workflow that fetches unread emails, classifies them, and applies Gmail labels."""
+    """Workflow that fetches unlabeled inbox emails, classifies them, and applies Gmail labels."""
 
     def __init__(self) -> None:
         """Initialize workflow dependencies."""
@@ -60,7 +60,7 @@ class EmailTriageWorkflow:
         """Run the workflow, returning summary statistics.
 
         Args:
-            max_emails: Maximum number of unread emails to process.
+            max_emails: Maximum number of inbox emails to process.
             dry_run: When True, skip applying labels (classification only).
             verbose: When True, print per-email results to stdout.
             verbosity: Verbosity level for logging additional details.
@@ -90,12 +90,15 @@ class EmailTriageWorkflow:
                 logger.info("Max emails set to %s; nothing to do.", max_emails)
                 return stats
 
-            emails = self.gmail_client.get_unread_emails(max_results=max_emails)
+            emails = self.gmail_client.get_inbox_candidates(
+                max_results=max_emails,
+                exclude_labels=self.valid_labels,
+            )
             if not emails:
-                logger.info("No unread emails found")
+                logger.info("No unlabeled inbox emails found")
                 return stats
 
-            logger.info("Processing %s unread emails", len(emails))
+            logger.info("Processing %s unlabeled inbox emails", len(emails))
 
             for email in emails:
                 stats["processed"] += 1
@@ -294,14 +297,14 @@ class EmailTriageWorkflow:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments for the workflow."""
     parser = argparse.ArgumentParser(
-        description="Classify unread Gmail messages and apply labels."
+        description="Classify unlabeled Gmail inbox messages and apply labels."
     )
     parser.add_argument(
         "-n",
         "--num-messages",
         type=int,
         default=10,
-        help="Maximum number of unread emails to process (default: 10).",
+        help="Maximum number of inbox emails to process (default: 10).",
     )
     parser.add_argument(
         "--dry-run",

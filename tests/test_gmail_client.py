@@ -56,8 +56,8 @@ def test_gmail_client_creates_new_token(mock_exists, mock_flow, mock_build):
 @patch("src.integrations.gmail_client.build")
 @patch("src.integrations.gmail_client.Credentials")
 @patch("pathlib.Path.exists")
-def test_get_unread_emails(mock_exists, mock_creds, mock_build, mock_gmail_service):
-    """Test fetching unread emails."""
+def test_get_inbox_candidates(mock_exists, mock_creds, mock_build, mock_gmail_service):
+    """Test fetching unlabeled inbox emails."""
     mock_exists.return_value = True
     mock_creds.from_authorized_user_file.return_value = MagicMock(valid=True)
     mock_build.return_value = mock_gmail_service
@@ -80,10 +80,15 @@ def test_get_unread_emails(mock_exists, mock_creds, mock_build, mock_gmail_servi
     }
 
     client = GmailClient()
-    emails = client.get_unread_emails(max_results=10)
+    emails = client.get_inbox_candidates(max_results=10, exclude_labels={"VIP", "marketing"})
 
     assert len(emails) == 2
     assert emails[0]["subject"] == "Test Subject"
+    mock_gmail_service.users().messages().list.assert_any_call(
+        userId="me",
+        q='in:inbox has:nouserlabels -label:"marketing" -label:"VIP"',
+        maxResults=10,
+    )
 
 
 @patch("src.integrations.gmail_client.build")
@@ -126,8 +131,8 @@ def test_apply_label_creates_if_not_exists(mock_exists, mock_creds, mock_build, 
 @patch("src.integrations.gmail_client.build")
 @patch("src.integrations.gmail_client.Credentials")
 @patch("pathlib.Path.exists")
-def test_get_unread_emails_returns_empty_list_when_no_emails(mock_exists, mock_creds, mock_build, mock_gmail_service):
-    """Test fetching unread emails when none exist."""
+def test_get_inbox_candidates_returns_empty_list_when_no_emails(mock_exists, mock_creds, mock_build, mock_gmail_service):
+    """Test fetching unlabeled inbox emails when none exist."""
     mock_exists.return_value = True
     mock_creds.from_authorized_user_file.return_value = MagicMock(valid=True)
     mock_build.return_value = mock_gmail_service
@@ -136,6 +141,6 @@ def test_get_unread_emails_returns_empty_list_when_no_emails(mock_exists, mock_c
     mock_gmail_service.users().messages().list().execute.return_value = {}
 
     client = GmailClient()
-    emails = client.get_unread_emails(max_results=10)
+    emails = client.get_inbox_candidates(max_results=10)
 
     assert len(emails) == 0

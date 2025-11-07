@@ -59,7 +59,7 @@ def deterministic_rules():
 
 def _configure_gmail_mock(mock_gmail_client_cls, emails):
     mock_gmail_client = MagicMock()
-    mock_gmail_client.get_unread_emails.return_value = emails
+    mock_gmail_client.get_inbox_candidates.return_value = emails
     mock_gmail_client.get_primary_address.return_value = "triager@example.com"
     mock_gmail_client.get_user_addresses.return_value = {"triager@example.com"}
     mock_gmail_client.label_exists.return_value = True

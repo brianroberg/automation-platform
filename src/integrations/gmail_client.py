@@ -2,7 +2,7 @@
 import base64
 import logging
 from email.utils import getaddresses
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from google.auth.transport.requests import Request  # type: ignore[import-untyped]
 from google.oauth2.credentials import Credentials  # type: ignore[import-untyped]
@@ -110,11 +110,16 @@ class GmailClient:
             self._refresh_label_cache()
         return label_name in self._label_name_to_id
 
-    def get_unread_emails(self, max_results: int = 10) -> list[dict[str, Any]]:
-        """Fetch unread emails from inbox.
+    def get_inbox_candidates(
+        self,
+        max_results: int = 10,
+        exclude_labels: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch inbox emails that are not already labeled by the workflow.
 
         Args:
             max_results: Maximum number of emails to fetch
+            exclude_labels: Gmail label names that indicate the workflow already processed a message.
 
         Returns:
             List of email dictionaries with keys:
@@ -127,28 +132,32 @@ class GmailClient:
         Raises:
             HttpError: If API call fails
         """
-        logger.info(f"Fetching up to {max_results} unread emails")
+        logger.info(
+            "Fetching up to %s inbox emails excluding labels %s",
+            max_results,
+            exclude_labels,
+        )
 
         try:
-            # Search for unread emails in inbox
+            query = self._build_inbox_query(exclude_labels)
+
             results = self.service.users().messages().list(
                 userId="me",
-                q="is:unread in:inbox",
-                maxResults=max_results
+                q=query,
+                maxResults=max_results,
             ).execute()
 
             messages = results.get("messages", [])
-            logger.info(f"Found {len(messages)} unread emails")
+            logger.info("Found %s inbox candidates", len(messages))
 
             if not messages:
                 return []
 
-            # Fetch full details for each message
             emails = []
             for msg in messages:
                 email = self._get_email_details(msg["id"])
                 emails.append(email)
-                logger.debug(f"Fetched email {msg['id']}: {email['subject'][:50]}...")
+                logger.debug("Fetched email %s: %s...", msg["id"], email["subject"][:50])
 
             return emails
 
@@ -156,7 +165,7 @@ class GmailClient:
             logger.error(f"Gmail API error: {e}")
             raise
         except Exception as e:
-            logger.error(f"Failed to fetch unread emails: {e}")
+            logger.error(f"Failed to fetch inbox emails: {e}")
             raise
 
     def _get_email_details(self, msg_id: str) -> dict[str, Any]:
@@ -234,6 +243,29 @@ class GmailClient:
                         return result
 
         return ""
+
+    @staticmethod
+    def _build_inbox_query(exclude_labels: Iterable[str] | None) -> str:
+        """Build Gmail search query for inbox messages without specified labels."""
+        query_parts = ["in:inbox", "has:nouserlabels"]
+        if exclude_labels:
+            sanitized = sorted(
+                {
+                    label.strip()
+                    for label in exclude_labels
+                    if isinstance(label, str) and label.strip()
+                },
+                key=lambda value: value.lower(),
+            )
+            for label in sanitized:
+                query_parts.append(f'-label:{GmailClient._quote_label_for_query(label)}')
+        return " ".join(query_parts)
+
+    @staticmethod
+    def _quote_label_for_query(label: str) -> str:
+        """Quote a Gmail label so it can be used safely in the search query."""
+        escaped = label.replace('"', r"\"")
+        return f'"{escaped}"'
 
     def apply_label(self, msg_id: str, label_name: str) -> None:
         """Apply a label to an email.
