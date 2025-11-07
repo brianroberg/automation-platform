@@ -33,8 +33,13 @@ class EmailTriageWorkflow:
 
             self.gmail_client = GmailClient()
             self.llm_client = LLMClient()
+            self.email_groups = Config.load_email_groups()
             rules_data = Config.load_deterministic_rules()
-            self.rules_engine = DeterministicRuleEngine(rules_data, self.valid_labels)
+            self.rules_engine = DeterministicRuleEngine(
+                rules_data,
+                self.valid_labels,
+                email_groups=self.email_groups,
+            )
             self.primary_email = self.gmail_client.get_primary_address()
             self.user_addresses = self.gmail_client.get_user_addresses()
             if not self.user_addresses and self.primary_email:

@@ -47,6 +47,10 @@ class Config:
         "DETERMINISTIC_RULES_FILE",
         "config/deterministic_rules.yaml",
     )
+    EMAIL_GROUPS_FILE = PROJECT_ROOT / os.getenv(
+        "EMAIL_GROUPS_FILE",
+        "config/email_groups.yaml",
+    )
 
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -99,6 +103,51 @@ class Config:
         logger.info("Loaded %s deterministic rules", len(rules))
         # Future enhancement: allow condition modules to inspect received date, attachments, etc.
         return rules
+
+    @classmethod
+    def load_email_groups(cls) -> dict[str, set[str]]:
+        """Load named email groups used by deterministic rules."""
+        path = cls.EMAIL_GROUPS_FILE
+        logger.debug("Loading email groups from %s", path)
+
+        if not path.exists():
+            logger.info(
+                "Email groups file not found at %s; continuing without shared groups",
+                path,
+            )
+            return {}
+
+        with open(path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+
+        groups_data = data.get("groups", data)
+        if not isinstance(groups_data, dict):
+            raise ValueError("Email groups file must define a mapping of group names to addresses.")
+
+        normalized: dict[str, set[str]] = {}
+        for name, entries in groups_data.items():
+            if not isinstance(name, str):
+                raise ValueError("Email group names must be strings.")
+            values: list[str]
+            if entries is None:
+                values = []
+            elif isinstance(entries, str):
+                values = [entries]
+            elif isinstance(entries, list):
+                if not all(isinstance(item, str) for item in entries):
+                    raise ValueError(f"Email group '{name}' contains non-string entries.")
+                values = list(entries)
+            else:
+                raise ValueError(
+                    f"Email group '{name}' must be defined as a string or list of strings."
+                )
+
+            normalized[name.lower()] = {
+                value.strip().lower() for value in values if isinstance(value, str) and value.strip()
+            }
+
+        logger.info("Loaded %s email groups", len(normalized))
+        return normalized
 
     @classmethod
     def get_triage_addresses(cls, primary_email: str | None = None) -> set[str]:

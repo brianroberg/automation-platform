@@ -1,0 +1,11 @@
+# Named email address groups used by deterministic rules. Copy this file to
+# config/email_groups.yaml (which is gitignored) and replace the sample
+# addresses with real values.
+groups:
+  vip:
+    - vip1@example.com
+    - vip2@example.com
+
+  executive-team:
+    - ceo@example.com
+    - coo@example.com

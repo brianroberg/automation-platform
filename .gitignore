@@ -14,8 +14,7 @@ ENV/
 # Configuration (contains secrets)
 config/gmail_credentials.json
 config/gmail_token.json
-config/vip_senders.json
-config/deterministic_rules.yaml
+config/email_groups.yaml
 
 # Data
 data/logs/*.log

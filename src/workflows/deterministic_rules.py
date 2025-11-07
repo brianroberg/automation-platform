@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +130,26 @@ class DeterministicRuleEngine:
         self,
         rules_data: Iterable[dict[str, Any]],
         valid_labels: set[str],
+        email_groups: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         self.valid_labels = valid_labels
         self.rules = [self._parse_rule(entry) for entry in rules_data]
+        self.email_groups = self._normalize_email_groups(email_groups or {})
+
+    @staticmethod
+    def _normalize_email_groups(
+        groups: Mapping[str, Iterable[str]],
+    ) -> dict[str, set[str]]:
+        normalized: dict[str, set[str]] = {}
+        for name, addresses in groups.items():
+            if not isinstance(name, str):
+                raise ValueError("Email group names must be strings.")
+            normalized[name.lower()] = {
+                str(address).strip().lower()
+                for address in addresses
+                if str(address).strip()
+            }
+        return normalized
 
     def _parse_rule(self, data: dict[str, Any]) -> DeterministicRule:
         name = data.get("name")
@@ -230,6 +247,22 @@ class DeterministicRuleEngine:
         if blocked and value in {entry.lower() for entry in blocked}:
             return False
 
+        groups_any = self._normalize_group_names(spec.get("group") or spec.get("groups_any"))
+        if groups_any:
+            if not self._match_sender_groups(value, groups_any):
+                return False
+
+        groups_all = self._normalize_group_names(spec.get("groups_all"))
+        if groups_all:
+            if not self._match_sender_groups(value, groups_all, require_all=True):
+                return False
+
+        groups_not = self._normalize_group_names(
+            spec.get("groups_not") or spec.get("groups_not_any")
+        )
+        if groups_not and self._match_sender_groups(value, groups_not):
+            return False
+
         domain_in = spec.get("domains")
         if domain_in and domain not in {entry.lower() for entry in domain_in}:
             return False
@@ -243,6 +276,34 @@ class DeterministicRuleEngine:
             return False
 
         return True
+
+    def _normalize_group_names(self, raw: Any) -> list[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            return [raw.strip().lower()] if raw.strip() else []
+        if isinstance(raw, Iterable):
+            names: list[str] = []
+            for entry in raw:
+                if isinstance(entry, str) and entry.strip():
+                    names.append(entry.strip().lower())
+            return names
+        raise ValueError("Email group references must be strings or iterables of strings.")
+
+    def _match_sender_groups(
+        self,
+        sender: str,
+        group_names: list[str],
+        require_all: bool = False,
+    ) -> bool:
+        missing = [name for name in group_names if name not in self.email_groups]
+        if missing:
+            raise ValueError(
+                f"Deterministic rule referenced unknown email group(s): {', '.join(sorted(missing))}"
+            )
+
+        matches = [sender in self.email_groups[name] for name in group_names]
+        return all(matches) if require_all else any(matches)
 
     def _match_text(self, spec: Any, text_value: str) -> bool:
         if not spec:

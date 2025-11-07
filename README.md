@@ -67,7 +67,13 @@ cp .env.example .env
 
 Edit `config/labels.json` to customize email classification categories and their definitions.
 
-### 7. Configure Deterministic Rules
+### 7. Configure Shared Email Groups
+
+Copy `config/email_groups.example.yaml` to `config/email_groups.yaml` and fill in the real email
+addresses for each named group (e.g. `vip`, `executive-team`). This file stays out of git so you can
+store sensitive sender lists locally while still referencing them from rules.
+
+### 8. Configure Deterministic Rules
 
 Copy `config/deterministic_rules.example.yaml` to `config/deterministic_rules.yaml` and edit it to describe the pre-LLM rules you want to run (for example VIP sender rules, recipient-based heuristics, or termination logic). Rules are evaluated in order, can add or exclude labels, and may optionally terminate processing of a message before the LLM runs.
 

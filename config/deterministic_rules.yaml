@@ -33,6 +33,25 @@ rules:
         - fyi
     terminate: false
 
+  - name: delete-social-media
+    description: "Auto-delete social media notifications."
+    when:
+      any:
+        - sender:
+            domains:
+              - facebook.com
+              - twitter.com
+              - linkedin.com
+        - subject:
+            contains_any:
+              - "New friend request"
+              - "New follower"
+              - "Connection request"
+    actions:
+      add:
+        - to-delete
+    terminate: true
+
   - name: bulk-newsletter
     description: "Treat high-recipient-count newsletters as FYI and skip response-required."
     when:
