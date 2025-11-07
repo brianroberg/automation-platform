@@ -1,4 +1,17 @@
 rules:
+  - name: notifications
+    description: "Notification emails"
+    when:
+      any:
+        - sender:
+            groups_any:
+              - notification-senders
+    actions:
+      add:
+        - fyi
+      exclude: []
+    terminate: true
+
   - name: vip-sender
     description: "Immediately label messages from VIP senders."
     when:
@@ -59,8 +72,8 @@ rules:
         - marketing
     terminate: false
 
-  - name: delete-social-media
-    description: "Auto-delete social media notifications."
+  - name: delete-immediately
+    description: "Auto-delete certain types of email."
     when:
       any:
         - sender:
@@ -70,12 +83,23 @@ rules:
               - linkedin.com
         - subject:
             contains_any:
-              - "New friend request"
-              - "New follower"
-              - "Connection request"
+              - "adobe contract"
+              - "adobe licenses"
     actions:
       add:
         - to-delete
+    terminate: true
+
+  - name: newsletters-i-want
+    description: "Identify newsletters I want to keep."
+    when:
+      any:
+        - sender:
+            groups_any:
+              - newsletters
+    actions:
+      add:
+        - newsletter
     terminate: true
 
   - name: bulk-newsletter
