@@ -6,9 +6,6 @@ rules:
         - sender:
             groups_any:
               - vip
-        - sender:
-            domains:
-              - vip-partners.example
     actions:
       add:
         - VIP
@@ -47,6 +44,20 @@ rules:
       add:
         - to-delete
     terminate: true
+
+  - name: internal-not-marketing
+    description: "Emails from trusted domains shouldn't be marked as marketing."
+    when:
+      all:
+        - sender:
+            domains:
+              - dm.org
+              - supportbeemail.com
+              - oakwoodpca.org
+    actions:
+      exclude:
+        - marketing
+    terminate: false
 
   - name: delete-social-media
     description: "Auto-delete social media notifications."

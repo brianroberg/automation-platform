@@ -5,6 +5,10 @@
       "description": "Important senders who should always be surfaced immediately."
     },
     {
+      "name": "marketing",
+      "description": "Promotional emails including advertisements, newsletters, offers, and campaigns from businesses or organizations."
+    },
+    {
       "name": "response-required",
       "description": "Emails that require a direct response or action from the recipient. Includes questions, requests, invitations requiring RSVP, or time-sensitive matters."
     },
